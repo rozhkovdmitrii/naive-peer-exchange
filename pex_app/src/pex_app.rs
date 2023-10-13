@@ -1,17 +1,17 @@
-use pex::{Config, Pex};
+use pex::{NetworkingImpl, Peer, PeerConfig};
 
 pub(super) struct PexApp {
-    _pex: Pex,
+    pex: Peer,
 }
 
 impl PexApp {
-    pub(super) fn new(config: Config) -> PexApp {
+    pub(super) fn new(config: PeerConfig) -> PexApp {
         PexApp {
-            _pex: Pex::new(config),
+            pex: Peer::new(config, Box::new(NetworkingImpl::new())),
         }
     }
 
     pub(super) async fn execute(self) {
-        self._pex.execute().await;
+        self.pex.execute().await;
     }
 }

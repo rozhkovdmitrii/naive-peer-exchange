@@ -1,0 +1,4 @@
+brace_style = "SameLineWhere"
+where_single_line = true
+chain_width = 100
+fn_call_width = 92

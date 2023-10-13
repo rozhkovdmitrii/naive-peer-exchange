@@ -1,6 +1,6 @@
 use clap::Parser;
 
-use pex::Config;
+use pex::PeerConfig;
 
 const MESSAGING_TIMEOUT_SEC: u64 = 2;
 const DEFAULT_LISTEN_PORT: u16 = 8080;
@@ -13,15 +13,15 @@ pub(super) struct Cli {
     #[arg(long, short, help = "Port of the current peer to listen to", default_value_t = DEFAULT_LISTEN_PORT)]
     port: u16,
     #[arg(long, short, help = "Address of the peer to connect to initially")]
-    connect: Vec<String>,
+    connect: Option<String>,
 }
 
-impl From<Cli> for Config {
+impl From<Cli> for PeerConfig {
     fn from(value: Cli) -> Self {
-        Config {
+        PeerConfig {
             messaging_timeout_sec: value.period,
             port: value.port,
-            peers: value.connect,
+            init_peer: value.connect,
         }
     }
 }
