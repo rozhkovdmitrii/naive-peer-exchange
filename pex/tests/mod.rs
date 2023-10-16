@@ -10,8 +10,8 @@ use futures::lock::Mutex as AsyncMutex;
 use futures::StreamExt;
 
 use pex::{
-    NetworkError, NetworkEvent, Networking, NetworkingImpl, Peer, PeerConfig, PeerError, PeerEvent,
-    PeerInteractor,
+    NetworkError, NetworkEvent, Networking, NetworkingImpl, PeerConfig, PeerError, PeerEvent,
+    PeerExchange, PeerInteractor,
 };
 
 type TestConnReceiver = UnboundedReceiver<TestConnection>;
@@ -45,7 +45,7 @@ struct TestPeerInteractor {
 
 #[tokio::test]
 async fn test_peer_are_listening() {
-    let peer1 = Peer::new(
+    let peer1 = PeerExchange::new(
         PeerConfig {
             messaging_timeout_sec: 4,
             init_peer: None,
@@ -54,7 +54,7 @@ async fn test_peer_are_listening() {
         Box::new(NetworkingImpl::new()),
     );
 
-    let peer2 = Peer::new(
+    let peer2 = PeerExchange::new(
         PeerConfig {
             messaging_timeout_sec: 4,
             init_peer: Some("127.0.0.1:8080".to_string()),

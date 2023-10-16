@@ -3,7 +3,6 @@ mod logging;
 mod pex_app;
 
 use clap::Parser;
-use tokio;
 
 use pex_app::PexApp;
 

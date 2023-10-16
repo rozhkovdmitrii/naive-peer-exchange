@@ -1,15 +1,18 @@
 use async_trait::async_trait;
 use derive_more::Display;
+use futures::{
+    channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
+    lock::Mutex as AsyncMutex,
+    SinkExt,
+};
 use log::{error, info};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use tokio::net::{TcpListener, TcpStream};
 
-use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
-use futures::lock::Mutex as AsyncMutex;
-use futures::SinkExt;
-
-use crate::peer_interactor::{PeerInteractor, PeerInteractorImpl};
+use super::peer_interactor::{PeerInteractor, PeerInteractorImpl};
 
 #[derive(Display)]
 pub enum NetworkError {
@@ -25,7 +28,7 @@ pub enum NetworkEvent {
 pub trait Networking: Send + Sync {
     async fn get_network_event_rx(&self) -> Option<UnboundedReceiver<NetworkEvent>>;
     async fn connect_to(&self, peer_address: &str) -> Result<(), NetworkError>;
-    async fn start_listening(&self, port: u16) -> Result<(), NetworkError>;
+    async fn accept_connections(&self, port: u16) -> Result<(), NetworkError>;
 }
 
 pub struct NetworkingImpl {
@@ -53,13 +56,14 @@ impl Networking for NetworkingImpl {
             .map_err(|error| NetworkError::ConnectingError(error.to_string()))
     }
 
-    async fn start_listening(&self, port: u16) -> Result<(), NetworkError> {
-        Self::listen(self.id_counter.clone(), port, self.event_tx.lock().await.clone()).await
+    async fn accept_connections(&self, port: u16) -> Result<(), NetworkError> {
+        Self::accept_connections(self.id_counter.clone(), port, self.event_tx.lock().await.clone())
+            .await
     }
 }
 
-impl NetworkingImpl {
-    pub fn new() -> NetworkingImpl {
+impl Default for NetworkingImpl {
+    fn default() -> Self {
         let (event_tx, event_rx) = unbounded::<NetworkEvent>();
         NetworkingImpl {
             id_counter: Arc::new(AtomicU64::new(0)),
@@ -67,8 +71,10 @@ impl NetworkingImpl {
             event_rx: AsyncMutex::new(Some(event_rx)),
         }
     }
+}
 
-    async fn listen(
+impl NetworkingImpl {
+    async fn accept_connections(
         id_counter: Arc<AtomicU64>,
         port: u16,
         mut tx: UnboundedSender<NetworkEvent>,
@@ -78,7 +84,6 @@ impl NetworkingImpl {
             .await
             .map_err(|err| NetworkError::ListeningError(err.to_string()))?;
         info!("Bound tcp server: {}, {}", ip, port);
-
         loop {
             match server.accept().await {
                 Ok((stream, address)) => {

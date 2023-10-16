@@ -6,9 +6,9 @@ mod peer_keeper;
 mod pex;
 mod rpc_data;
 
-pub use crate::pex::Peer;
+pub use crate::pex::PeerExchange;
 pub use networking::{NetworkError, NetworkEvent, Networking, NetworkingImpl};
-pub use peer_interactor::{PeerError, PeerEvent, PeerInteractor};
+pub use peer_interactor::{PeerError, PeerInteractor};
 
 #[derive(Debug)]
 pub struct PeerConfig {

@@ -12,3 +12,4 @@ env_logger = "0.10"
 log = "0.4"
 pex = { version = "0.1", path = "../pex" }
 tokio = { version = "1.25", features = [ "macros", "rt", "time" ] }
+libc = "0.2.149"

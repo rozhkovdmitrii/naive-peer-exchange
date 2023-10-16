@@ -1,13 +1,13 @@
-use pex::{NetworkingImpl, Peer, PeerConfig};
+use pex::{NetworkingImpl, PeerConfig, PeerExchange};
 
 pub(super) struct PexApp {
-    pex: Peer,
+    pex: PeerExchange,
 }
 
 impl PexApp {
     pub(super) fn new(config: PeerConfig) -> PexApp {
         PexApp {
-            pex: Peer::new(config, Box::new(NetworkingImpl::new())),
+            pex: PeerExchange::new(config, <Box<NetworkingImpl>>::default()),
         }
     }
 

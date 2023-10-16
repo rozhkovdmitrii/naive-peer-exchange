@@ -9,7 +9,8 @@ use crate::peer_keeper::PeerKeeperEvent::CheckValidity;
 use crate::PeerInteractor;
 
 const KEEPER_SCHEDULE_CAPACITY: usize = 100_000;
-const VALIDATE_TIMEOUT_SEC: usize = 3;
+const VALIDATE_TIMEOUT_SEC: usize = 1;
+const KEEPER_TIME_WHEEL_TIC_SEC: u64 = 1;
 
 pub(super) struct PeerKeeper {
     context: Arc<AsyncMutex<PeerKeeperContex>>,
@@ -24,7 +25,7 @@ struct PeerKeeperContex {
 enum PeerKeeperEvent {
     /// Until the public address is not received through the connection it's considered as invalid
     /// that is why every connection should be checked for the validity after time and be thrown away if it's not
-    CheckValidity { invalidated_id: u64 },
+    CheckValidity { conn_id: u64 },
 }
 
 impl PeerKeeper {
@@ -40,22 +41,19 @@ impl PeerKeeper {
 
     pub(super) async fn execute(&self) {
         let context = self.context.clone();
-
         loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            tokio::time::sleep(Duration::from_secs(KEEPER_TIME_WHEEL_TIC_SEC)).await;
             let mut guard = context.lock().await;
             let events = guard.schedule.tick();
             for event in events {
                 match event {
-                    CheckValidity {
-                        invalidated_id: conn_id,
-                    } => Self::check_address_valid(&mut guard, conn_id),
+                    CheckValidity { conn_id } => Self::remove_invalid_conn(&mut guard, conn_id),
                 }
             }
         }
     }
 
-    fn check_address_valid(guard: &mut MutexGuard<'_, PeerKeeperContex>, conn_id: u64) {
+    fn remove_invalid_conn(guard: &mut MutexGuard<'_, PeerKeeperContex>, conn_id: u64) {
         if !guard.peers.contains_key(&conn_id) {
             guard.connections.remove(&conn_id);
             warn!("Public address has not been received for the connection, deleted: {}", conn_id);
@@ -73,12 +71,7 @@ impl PeerKeeper {
             Ok(new) => {
                 let conn_id = new.get_id();
                 debug!("Peer registered: {} - {}", conn_id, new.get_address());
-                guard.schedule.schedule(
-                    VALIDATE_TIMEOUT_SEC,
-                    CheckValidity {
-                        invalidated_id: conn_id,
-                    },
-                );
+                guard.schedule.schedule(VALIDATE_TIMEOUT_SEC, CheckValidity { conn_id });
             }
         }
     }
@@ -87,7 +80,10 @@ impl PeerKeeper {
         let mut guard = self.context.lock().await;
 
         if !guard.connections.contains_key(&conn_id) {
-            error!("Failed to process on_peer_info, connection not found: {}", conn_id);
+            error!(
+                "Failed to process public_address: {}, connection not found: {}",
+                address, conn_id
+            );
             return;
         };
 
@@ -99,4 +95,25 @@ impl PeerKeeper {
         }
         debug!("Public address: {} - assigned for the connection: {}", address, conn_id);
     }
+
+    pub(super) async fn on_peer_disconnected(&self, conn_id: u64) {
+        self.drop_connection(conn_id).await;
+    }
+
+    pub(super) async fn on_peer_error(&self, conn_id: u64) {
+        self.drop_connection(conn_id).await;
+    }
+
+    async fn drop_connection(&self, conn_id: u64) {
+        let mut guard = self.context.lock().await;
+        if guard.connections.remove(&conn_id).is_none() {
+            debug!("Nothing removed from the connections by the conn_id: {}", conn_id);
+        }
+        if guard.peers.remove(&conn_id).is_some() {
+            debug!("Connection has been removed from registry: {}", conn_id);
+        };
+    }
 }
+
+#[cfg(test)]
+fn test_deserializer() {}
