@@ -9,7 +9,7 @@ use crate::peer_keeper::PeerKeeperEvent::CheckValidity;
 use crate::PeerInteractor;
 
 const KEEPER_SCHEDULE_CAPACITY: usize = 100_000;
-const VALIDATE_TIMEOUT_SEC: usize = 1;
+const VALIDATE_TIMEOUT_TICKS: usize = 1;
 const KEEPER_TIME_WHEEL_TIC_SEC: u64 = 1;
 
 pub(super) struct PeerKeeper {
@@ -62,7 +62,8 @@ impl PeerKeeper {
 
     pub async fn on_new_peer(&self, peer: Arc<dyn PeerInteractor + Send>) {
         let mut guard = self.context.lock().await;
-        match guard.connections.try_insert(peer.get_id(), peer) {
+        let conn_id = peer.get_id();
+        match guard.connections.try_insert(conn_id, peer) {
             Err(old) => {
                 let conn_id = old.value.get_id();
                 let address = old.value.get_address();
@@ -71,7 +72,7 @@ impl PeerKeeper {
             Ok(new) => {
                 let conn_id = new.get_id();
                 debug!("Peer registered: {} - {}", conn_id, new.get_address());
-                guard.schedule.schedule(VALIDATE_TIMEOUT_SEC, CheckValidity { conn_id });
+                guard.schedule.schedule(VALIDATE_TIMEOUT_TICKS, CheckValidity { conn_id });
             }
         }
     }
@@ -113,7 +114,9 @@ impl PeerKeeper {
             debug!("Connection has been removed from registry: {}", conn_id);
         };
     }
-}
 
-#[cfg(test)]
-fn test_deserializer() {}
+    pub(super) async fn get_peers(&self) -> Vec<String> {
+        let guard = self.context.lock().await;
+        guard.peers.values().cloned().collect()
+    }
+}

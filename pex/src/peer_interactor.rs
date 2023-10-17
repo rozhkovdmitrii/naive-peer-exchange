@@ -60,7 +60,11 @@ pub trait PeerInteractor: Send + Sync {
         event_tx: UnboundedSender<PeerEvent>,
     ) -> JoinHandle<Result<(), PeerError>>;
     async fn send_random_message(&self) -> Result<(), PeerError>;
-    fn send_public_port(&self, public_port: u16) -> JoinHandle<Result<(), PeerError>>;
+    fn send_public_port(
+        &self,
+        public_address: String,
+        public_port: u16,
+    ) -> JoinHandle<Result<(), PeerError>>;
     fn get_id(&self) -> u64;
     fn get_address(&self) -> &str;
 }
@@ -89,22 +93,20 @@ impl PeerInteractor for PeerInteractorImpl {
         Ok(())
     }
 
-    fn send_public_port(&self, public_port: u16) -> JoinHandle<Result<(), PeerError>> {
+    fn send_public_port(
+        &self,
+        public_address: String,
+        public_port: u16,
+    ) -> JoinHandle<Result<(), PeerError>> {
         debug!("Send public_port: {}", public_port);
         let weak_write = Arc::downgrade(&self.write);
         let conn_id = self.id;
-        spawn(async move {
-            let write = weak_write
-                .upgrade()
-                .ok_or_else(|| PeerError::new(conn_id, PeerErrorImpl::PeerNotAvailable))?;
-            let mut write = write.lock().await;
-            let framed_write = FramedWrite::new(write.deref_mut(), LengthDelimitedCodec::new());
-            let mut sender = SymmetricallyFramed::new(framed_write, SymmetricalJson::default());
-            let message = PeerMessage::PublicAddress { port: public_port };
-            sender.send(message).await.map_err(|error| {
-                PeerError::new(conn_id, PeerErrorImpl::SendError(error.to_string()))
-            })
-        })
+        spawn(PeerInteractorImpl::send_public_address_impl(
+            public_address,
+            public_port,
+            conn_id,
+            weak_write,
+        ))
     }
 
     fn get_id(&self) -> u64 {
@@ -174,16 +176,35 @@ impl PeerInteractorImpl {
         }
         Ok(())
     }
+
+    async fn send_public_address_impl(
+        public_address: String,
+        public_port: u16,
+        conn_id: u64,
+        weak_write: Weak<AsyncMutex<WriteHalf<TcpStream>>>,
+    ) -> Result<(), PeerError> {
+        debug!("Send public address impl, conn_id: {}, public_port: {}", conn_id, public_port);
+        let write = weak_write
+            .upgrade()
+            .ok_or_else(|| PeerError::new(conn_id, PeerErrorImpl::PeerNotAvailable))?;
+        let mut write = write.lock().await;
+        let framed_write = FramedWrite::new(write.deref_mut(), LengthDelimitedCodec::new());
+        let mut sender = SymmetricallyFramed::new(framed_write, SymmetricalJson::default());
+        let message = PeerMessage::PublicAddress {
+            address: format!("{}:{}", public_address, public_port),
+        };
+        sender
+            .send(message)
+            .await
+            .map_err(|error| PeerError::new(conn_id, PeerErrorImpl::SendError(error.to_string())))
+    }
 }
 
 impl PeerEvent {
     fn from_message(conn_id: u64, message: PeerMessage) -> PeerEvent {
         debug!("Got message {:?}", message);
         match message {
-            PeerMessage::PublicAddress { port } => PeerEvent::PublicAddress {
-                conn_id,
-                address: port.to_string(),
-            },
+            PeerMessage::PublicAddress { address } => PeerEvent::PublicAddress { conn_id, address },
             PeerMessage::RandomMessage { data } => PeerEvent::RandomMessage { conn_id, data },
         }
     }

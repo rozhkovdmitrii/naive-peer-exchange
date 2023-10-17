@@ -4,5 +4,5 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case", tag = "type", content = "data")]
 pub(super) enum PeerMessage {
     RandomMessage { data: String },
-    PublicAddress { port: u16 },
+    PublicAddress { address: String },
 }

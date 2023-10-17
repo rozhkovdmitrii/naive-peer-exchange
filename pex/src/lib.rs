@@ -11,8 +11,30 @@ pub use networking::{NetworkError, NetworkEvent, Networking, NetworkingImpl};
 pub use peer_interactor::{PeerError, PeerInteractor};
 
 #[derive(Debug)]
-pub struct PeerConfig {
-    pub messaging_timeout_sec: u64,
-    pub init_peer: Option<String>,
+/// Determines common settings to be applied to the peer exchange instance
+pub struct PeerExchangeConfig {
+    /// Public address could differ from the local interface that is accepting new connections
+    pub address: String,
+    /// Public port to accept new connections on
     pub port: u16,
+    /// Timeout that is used to determine in which moments random messages should be sent
+    pub messaging_timeout_sec: u64,
+    /// Initial peer to be connected by the current one at start
+    pub init_peer: Option<String>,
+}
+
+impl PeerExchangeConfig {
+    pub fn new<A: ToString>(
+        address: A,
+        port: u16,
+        messaging_timeout_sec: u64,
+        init_peer: Option<A>,
+    ) -> PeerExchangeConfig {
+        PeerExchangeConfig {
+            address: address.to_string(),
+            port,
+            messaging_timeout_sec,
+            init_peer: init_peer.map(|address| address.to_string()),
+        }
+    }
 }

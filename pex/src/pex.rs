@@ -11,19 +11,19 @@ use tokio::task::{JoinError, JoinHandle};
 use crate::networking::Networking;
 use crate::peer_interactor::PeerEvent;
 use crate::peer_keeper::PeerKeeper;
-use crate::{NetworkError, NetworkEvent, PeerConfig, PeerError, PeerInteractor};
+use crate::{NetworkError, NetworkEvent, PeerError, PeerExchangeConfig, PeerInteractor};
 
 const CHECK_PEER_RESULTS_TIMEOUT_MILLIS: u64 = 10;
 
 pub struct PeerExchange {
-    config: PeerConfig,
+    config: PeerExchangeConfig,
     networking: Box<dyn Networking>,
     peers_keeper: PeerKeeper,
     handles: AsyncMutex<FuturesUnordered<JoinHandle<Result<(), PeerError>>>>,
 }
 
 impl PeerExchange {
-    pub fn new(config: PeerConfig, networking: Box<dyn Networking>) -> PeerExchange {
+    pub fn new(config: PeerExchangeConfig, networking: Box<dyn Networking>) -> PeerExchange {
         PeerExchange {
             config,
             networking,
@@ -32,7 +32,7 @@ impl PeerExchange {
         }
     }
 
-    pub async fn execute(self) {
+    pub async fn execute(&self) {
         let network_event_rx = self.networking.get_network_event_rx().await;
         let network_event_rx = network_event_rx.expect("Expected network event rx available");
         if let Err(error) = self.init_peer().await {
@@ -55,13 +55,8 @@ impl PeerExchange {
         mut network_event_rx: UnboundedReceiver<NetworkEvent>,
         peer_event_tx: UnboundedSender<PeerEvent>,
     ) {
-        while let Some(NetworkEvent::NewPeer(peer_interactor)) = network_event_rx.next().await {
-            let peer: Arc<dyn PeerInteractor + Send> = peer_interactor.into();
-            let listen_handle = peer.start_listen_messages(peer_event_tx.clone());
-            self.handles.lock().await.push(listen_handle);
-            let send_handle = peer.send_public_port(self.config.port);
-            self.handles.lock().await.push(send_handle);
-            self.peers_keeper.on_new_peer(peer).await;
+        while let Some(network_event) = network_event_rx.next().await {
+            self.on_netwrok_event(network_event, peer_event_tx.clone()).await;
         }
     }
 
@@ -92,6 +87,33 @@ impl PeerExchange {
             match handle? {
                 Ok(()) => {}
                 Err(peer_error) => self.on_peer_error(peer_error).await,
+            }
+        }
+    }
+
+    async fn on_netwrok_event(
+        &self,
+        network_event: NetworkEvent,
+        peer_event_tx: UnboundedSender<PeerEvent>,
+    ) {
+        match network_event {
+            NetworkEvent::Connected(peer) => {
+                let peer: Arc<dyn PeerInteractor + Send> = peer.into();
+                let conn_id = peer.get_id();
+                let address = peer.get_address().to_string();
+                let listen_handle = peer.start_listen_messages(peer_event_tx.clone());
+                self.handles.lock().await.push(listen_handle);
+                let send_handle =
+                    peer.send_public_port(self.config.address.clone(), self.config.port);
+                self.handles.lock().await.push(send_handle);
+                self.peers_keeper.on_new_peer(peer).await;
+                self.peers_keeper.on_peer_public_address(conn_id, address).await;
+            }
+            NetworkEvent::Accepted(peer) => {
+                let peer: Arc<dyn PeerInteractor + Send> = peer.into();
+                let listen_handle = peer.start_listen_messages(peer_event_tx.clone());
+                self.handles.lock().await.push(listen_handle);
+                self.peers_keeper.on_new_peer(peer).await;
             }
         }
     }
@@ -129,5 +151,9 @@ impl PeerExchange {
         self.networking.connect_to(address).await?;
         info!("Connection established for address: {}", address);
         Ok(())
+    }
+
+    pub async fn get_peers(&self) -> Vec<String> {
+        self.peers_keeper.get_peers().await
     }
 }

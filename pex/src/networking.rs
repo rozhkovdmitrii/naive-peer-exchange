@@ -38,7 +38,8 @@ pub enum NetworkError {
 }
 
 pub enum NetworkEvent {
-    NewPeer(Box<dyn PeerInteractor + Send>),
+    Accepted(Box<dyn PeerInteractor + Send>),
+    Connected(Box<dyn PeerInteractor + Send>),
 }
 
 #[async_trait]
@@ -61,18 +62,7 @@ impl Networking for NetworkingImpl {
     }
 
     async fn connect_to(&self, address: &str) -> Result<(), NetworkError> {
-        let stream =
-            TcpStream::connect(address).await.map_err(|error| NetworkError::ConnectingError {
-                address: address.to_string(),
-                error: error.to_string(),
-            })?;
-        let new_id = self.id_counter.fetch_add(1, Ordering::Release);
-        let interactor = Box::new(PeerInteractorImpl::new(new_id, address.to_string(), stream));
-        let mut event_tx = self.event_tx.lock().await;
-        event_tx
-            .send(NetworkEvent::NewPeer(interactor))
-            .await
-            .map_err(|error| NetworkError::ChannelError(error.to_string()))
+        self.connect_to(address).await
     }
 
     async fn accept_connections(&self, port: u16) -> Result<(), NetworkError> {
@@ -113,7 +103,7 @@ impl NetworkingImpl {
                 .map_err(|error| NetworkError::AcceptError(error.to_string()))?;
             info!("Successfully accepted connection: {}", address);
             let id = id_counter.fetch_add(1, Ordering::Release);
-            tx.send(NetworkEvent::NewPeer(Box::new(PeerInteractorImpl::new(
+            tx.send(NetworkEvent::Accepted(Box::new(PeerInteractorImpl::new(
                 id,
                 address.to_string(),
                 stream,
@@ -121,5 +111,20 @@ impl NetworkingImpl {
             .await
             .map_err(|error| NetworkError::ChannelError(error.to_string()))?;
         }
+    }
+
+    async fn connect_to(&self, address: &str) -> Result<(), NetworkError> {
+        let stream =
+            TcpStream::connect(address).await.map_err(|error| NetworkError::ConnectingError {
+                address: address.to_string(),
+                error: error.to_string(),
+            })?;
+        let new_id = self.id_counter.fetch_add(1, Ordering::Release);
+        let interactor = Box::new(PeerInteractorImpl::new(new_id, address.to_string(), stream));
+        let mut event_tx = self.event_tx.lock().await;
+        event_tx
+            .send(NetworkEvent::Connected(interactor))
+            .await
+            .map_err(|error| NetworkError::ChannelError(error.to_string()))
     }
 }
