@@ -119,4 +119,15 @@ impl PeerKeeper {
         let guard = self.context.lock().await;
         guard.peers.values().cloned().collect()
     }
+
+    pub(super) async fn is_address_known(&self, address: &str) -> bool {
+        let context = self.context.lock().await;
+
+        for peer_address in context.peers.values() {
+            if peer_address == address {
+                return true;
+            }
+        }
+        false
+    }
 }

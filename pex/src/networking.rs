@@ -10,7 +10,11 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    spawn,
+    task::JoinHandle,
+};
 
 use super::peer_interactor::{PeerInteractor, PeerInteractorImpl};
 
@@ -45,7 +49,7 @@ pub enum NetworkEvent {
 #[async_trait]
 pub trait Networking: Send + Sync {
     async fn get_network_event_rx(&self) -> Option<UnboundedReceiver<NetworkEvent>>;
-    async fn connect_to(&self, peer_address: &str) -> Result<(), NetworkError>;
+    async fn connect_to(&self, peer_address: String) -> JoinHandle<Result<(), NetworkError>>;
     async fn accept_connections(&self, port: u16) -> Result<(), NetworkError>;
 }
 
@@ -61,8 +65,8 @@ impl Networking for NetworkingImpl {
         self.event_rx.lock().await.take()
     }
 
-    async fn connect_to(&self, address: &str) -> Result<(), NetworkError> {
-        self.connect_to(address).await
+    async fn connect_to(&self, peer_address: String) -> JoinHandle<Result<(), NetworkError>> {
+        self.connect_to(peer_address).await
     }
 
     async fn accept_connections(&self, port: u16) -> Result<(), NetworkError> {
@@ -113,18 +117,21 @@ impl NetworkingImpl {
         }
     }
 
-    async fn connect_to(&self, address: &str) -> Result<(), NetworkError> {
-        let stream =
-            TcpStream::connect(address).await.map_err(|error| NetworkError::ConnectingError {
-                address: address.to_string(),
-                error: error.to_string(),
-            })?;
+    async fn connect_to(&self, address: String) -> JoinHandle<Result<(), NetworkError>> {
         let new_id = self.id_counter.fetch_add(1, Ordering::Release);
-        let interactor = Box::new(PeerInteractorImpl::new(new_id, address.to_string(), stream));
-        let mut event_tx = self.event_tx.lock().await;
-        event_tx
-            .send(NetworkEvent::Connected(interactor))
-            .await
-            .map_err(|error| NetworkError::ChannelError(error.to_string()))
+        let mut event_tx = self.event_tx.lock().await.clone();
+        spawn(async move {
+            let stream = TcpStream::connect(&address).await.map_err(|error| {
+                NetworkError::ConnectingError {
+                    address: address.clone(),
+                    error: error.to_string(),
+                }
+            })?;
+            let peer = Box::new(PeerInteractorImpl::new(new_id, address, stream));
+            event_tx
+                .send(NetworkEvent::Connected(peer))
+                .await
+                .map_err(|error| NetworkError::ChannelError(error.to_string()))
+        })
     }
 }
