@@ -5,7 +5,7 @@ use futures::{
     lock::Mutex as AsyncMutex,
     SinkExt,
 };
-use log::{error, info};
+use log::info;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -14,10 +14,27 @@ use tokio::net::{TcpListener, TcpStream};
 
 use super::peer_interactor::{PeerInteractor, PeerInteractorImpl};
 
+const INTERFACE_TO_LISTEN: &str = "0.0.0.0";
+
 #[derive(Display)]
 pub enum NetworkError {
-    ListeningError(String),
-    ConnectingError(String),
+    #[display(
+        fmt = "Failed to bind server: {}:{}, error: {}",
+        interface,
+        port,
+        error
+    )]
+    BindServerError {
+        interface: String,
+        port: u16,
+        error: String,
+    },
+    #[display(fmt = "Failed to accept incoming connection: {}", _0)]
+    AcceptError(String),
+    #[display(fmt = "Failed to connect to: {}, error: {}", address, error)]
+    ConnectingError { address: String, error: String },
+    #[display(fmt = "Failed to pass a new peer connection over the channel: {}", _0)]
+    ChannelError(String),
 }
 
 pub enum NetworkEvent {
@@ -44,16 +61,18 @@ impl Networking for NetworkingImpl {
     }
 
     async fn connect_to(&self, address: &str) -> Result<(), NetworkError> {
-        let stream = TcpStream::connect(address)
-            .await
-            .map_err(|error| NetworkError::ConnectingError(error.to_string()))?;
+        let stream =
+            TcpStream::connect(address).await.map_err(|error| NetworkError::ConnectingError {
+                address: address.to_string(),
+                error: error.to_string(),
+            })?;
         let new_id = self.id_counter.fetch_add(1, Ordering::Release);
         let interactor = Box::new(PeerInteractorImpl::new(new_id, address.to_string(), stream));
         let mut event_tx = self.event_tx.lock().await;
         event_tx
             .send(NetworkEvent::NewPeer(interactor))
             .await
-            .map_err(|error| NetworkError::ConnectingError(error.to_string()))
+            .map_err(|error| NetworkError::ChannelError(error.to_string()))
     }
 
     async fn accept_connections(&self, port: u16) -> Result<(), NetworkError> {
@@ -79,30 +98,28 @@ impl NetworkingImpl {
         port: u16,
         mut tx: UnboundedSender<NetworkEvent>,
     ) -> Result<(), NetworkError> {
-        let (ip, port) = ("0.0.0.0", port);
-        let server = TcpListener::bind((ip, port))
-            .await
-            .map_err(|err| NetworkError::ListeningError(err.to_string()))?;
+        let (ip, port) = (INTERFACE_TO_LISTEN, port);
+        let server =
+            TcpListener::bind((ip, port)).await.map_err(|err| NetworkError::BindServerError {
+                interface: ip.to_string(),
+                port,
+                error: err.to_string(),
+            })?;
         info!("Bound tcp server: {}, {}", ip, port);
         loop {
-            match server.accept().await {
-                Ok((stream, address)) => {
-                    info!("Successfully accepted connection: {}", address);
-                    let id = id_counter.fetch_add(1, Ordering::Release);
-                    if let Err(error) = tx
-                        .send(NetworkEvent::NewPeer(Box::new(PeerInteractorImpl::new(
-                            id,
-                            address.to_string(),
-                            stream,
-                        ))))
-                        .await
-                    {
-                        error!("Failed to push out peer interactor: {}, error: {}", address, error);
-                        continue;
-                    };
-                }
-                Err(error) => error!("Failed to accept tcp stream, error: {}", error),
-            }
+            let (stream, address) = server
+                .accept()
+                .await
+                .map_err(|error| NetworkError::AcceptError(error.to_string()))?;
+            info!("Successfully accepted connection: {}", address);
+            let id = id_counter.fetch_add(1, Ordering::Release);
+            tx.send(NetworkEvent::NewPeer(Box::new(PeerInteractorImpl::new(
+                id,
+                address.to_string(),
+                stream,
+            ))))
+            .await
+            .map_err(|error| NetworkError::ChannelError(error.to_string()))?;
         }
     }
 }
