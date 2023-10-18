@@ -136,6 +136,7 @@ async fn test_many_peers_network() {
         peers.push(peer);
     }
 
+    #[allow(clippy::unnecessary_to_owned)]
     for peer in peers.iter().cloned() {
         tokio::time::sleep(Duration::from_millis(50)).await;
         spawn(async move { peer.execute().await });
