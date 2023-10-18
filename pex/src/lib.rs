@@ -1,12 +1,12 @@
 #![feature(map_try_insert)]
 
 mod networking;
+mod peer_exchange;
 mod peer_interactor;
 mod peer_keeper;
-mod pex;
 mod rpc_data;
 
-pub use crate::pex::PeerExchange;
+pub use crate::peer_exchange::PeerExchange;
 pub use networking::{NetworkError, NetworkEvent, Networking, NetworkingImpl};
 pub use peer_interactor::{PeerError, PeerInteractor};
 

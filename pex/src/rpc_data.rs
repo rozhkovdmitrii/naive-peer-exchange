@@ -5,4 +5,5 @@ use serde::{Deserialize, Serialize};
 pub(super) enum PeerMessage {
     RandomMessage { data: String },
     PublicAddress { address: String },
+    KnownPeers { peers: Vec<String> },
 }

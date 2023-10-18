@@ -40,12 +40,13 @@ impl PeerExchange {
         self.init_peer().await;
         let (peer_event_tx, peer_event_rx) = unbounded::<PeerEvent>();
         select!(
-            _ = self.process_new_connections(network_event_rx, peer_event_tx) => {},
-            _ = self.peers_keeper.execute() => {},
+            _ = self.process_new_connections(network_event_rx, peer_event_tx) => { error!("New connection processing unexpectedly interrupted") },
+            _ = self.peers_keeper.execute() => { error!("Peer keeping processing unexpectedly interrupted") },
             r = self.networking.accept_connections(self.config.port) => { if let Err(error) = r { error!("Accepting connections unexpectedly interrupted: {}", error) }},
-            _ = self.process_peer_events(peer_event_rx) => {}
+            _ = self.process_peer_events(peer_event_rx) => { error!("Peer events processing unexpectedly interrupted")}
             r = self.check_peer_results() => { if let Err(error) = r { error!("Checking peer results unexpectedly interrupted: {}", error); } }
             r = self.check_connect_results() => { if let Err(error) = r { error!("Checking connecting results unexpectedly interrupted: {}", error); } }
+            _ = self.messaging_loop() => { error!("Messaging loop unexpectedly interrupted")}
         );
     }
 
@@ -68,7 +69,7 @@ impl PeerExchange {
                 PeerEvent::RandomMessage { conn_id, data } => {
                     self.on_random_message(conn_id, data).await
                 }
-                PeerEvent::ListOfPeers { conn_id, peers } => {
+                PeerEvent::KnownPeers { conn_id, peers } => {
                     self.on_list_of_peers(conn_id, peers).await
                 }
                 PeerEvent::Disconnected { conn_id } => self.on_peer_disconnected(conn_id).await,
@@ -104,38 +105,103 @@ impl PeerExchange {
         }
     }
 
+    async fn messaging_loop(&self) {
+        let timeout_sec = self.config.messaging_timeout_sec;
+        loop {
+            tokio::time::sleep(Duration::from_secs(timeout_sec)).await;
+
+            let conns = self.peers_keeper.get_valid_conns().await;
+            for conn in conns {
+                debug!(
+                    "Send random message, address: {}, conn_id: {}",
+                    conn.get_address(),
+                    conn.get_id()
+                );
+                let send_handle = conn.send_random_message();
+                {
+                    self.peer_handles.lock().await.push(send_handle);
+                }
+            }
+        }
+    }
+
     async fn on_netwrok_event(
         &self,
         network_event: NetworkEvent,
         peer_event_tx: UnboundedSender<PeerEvent>,
     ) {
+        debug!("Got on the network channel, peer connected");
         match network_event {
-            NetworkEvent::Connected(peer) => {
-                let peer: Arc<dyn PeerInteractor + Send> = peer.into();
-                let conn_id = peer.get_id();
-                let address = peer.get_address().to_string();
-                let listen_handle = peer.start_listen_messages(peer_event_tx.clone());
-                self.peer_handles.lock().await.push(listen_handle);
-                let send_handle =
-                    peer.send_public_port(self.config.address.clone(), self.config.port);
-                self.peer_handles.lock().await.push(send_handle);
-                self.peers_keeper.on_new_peer(peer).await;
-                self.peers_keeper.on_peer_public_address(conn_id, address).await;
-            }
-            NetworkEvent::Accepted(peer) => {
-                let peer: Arc<dyn PeerInteractor + Send> = peer.into();
-                let listen_handle = peer.start_listen_messages(peer_event_tx.clone());
-                self.peer_handles.lock().await.push(listen_handle);
-                self.peers_keeper.on_new_peer(peer).await;
-            }
+            NetworkEvent::Connected(peer) => self.on_peer_connected(peer, peer_event_tx).await,
+            NetworkEvent::Accepted(peer) => self.on_peer_accepted(peer, peer_event_tx).await,
         }
     }
 
+    async fn on_peer_connected(
+        &self,
+        peer: Box<dyn PeerInteractor + Send>,
+        peer_event_tx: UnboundedSender<PeerEvent>,
+    ) {
+        let peer: Arc<dyn PeerInteractor + Send> = peer.into();
+        let conn_id = peer.get_id();
+        let address = peer.get_address().to_string();
+        debug!("peer connected, conn_id: {}, address: {}", conn_id, address);
+        if let Err(error) = self.peers_keeper.on_new_connection(peer.clone()).await {
+            error!("Failed to register connection: {}", error);
+            return;
+        }
+        if let Err(error) = self.peers_keeper.set_peer_as_valid(conn_id, address).await {
+            error!("Failed to set_peer_as_valid: {}", error);
+            return;
+        };
+        let listen_handle = peer.start_listen_messages(peer_event_tx.clone());
+        // {
+        //     self.peer_handles.lock().await.push(listen_handle);
+        // }
+        let send_handle = peer.send_public_address(self.config.address.clone(), self.config.port);
+        // {
+        //     self.peer_handles.lock().await.push(send_handle);
+        // }
+    }
+
+    async fn on_peer_accepted(
+        &self,
+        peer: Box<dyn PeerInteractor + Send>,
+        peer_event_tx: UnboundedSender<PeerEvent>,
+    ) {
+        let peer: Arc<dyn PeerInteractor + Send> = peer.into();
+        let conn_id = peer.get_id();
+        let address = peer.get_address().to_string();
+        debug!("peer accepted, conn_id: {}, address: {}", conn_id, address);
+        if let Err(error) = self.peers_keeper.on_new_connection(peer.clone()).await {
+            error!("{}", error);
+            return;
+        }
+        let listen_handle = peer.start_listen_messages(peer_event_tx.clone());
+        // {
+        //     self.peer_handles.lock().await.push(listen_handle)
+        // };
+    }
+
     async fn on_peer_public_address(&self, conn_id: u64, address: String) {
-        self.peers_keeper.on_peer_public_address(conn_id, address).await
+        let known_peers = self.peers_keeper.get_peers().await;
+        if let Err(error) = self.peers_keeper.set_peer_as_valid(conn_id, address).await {
+            error!("Failed process public address: {}", error);
+            return;
+        };
+        if known_peers.is_empty() {
+            return;
+        }
+        let conn = self.peers_keeper.get_connection(conn_id).await;
+        let conn = conn.expect("Expected connection be able to be found");
+        let send_handle = conn.send_known_peers(known_peers);
+        {
+            self.peer_handles.lock().await.push(send_handle)
+        };
     }
 
     async fn on_peer_disconnected(&self, conn_id: u64) {
+        info!("Got disconnected event, conn_id: {}", conn_id);
         self.peers_keeper.on_peer_disconnected(conn_id).await
     }
 
@@ -147,6 +213,7 @@ impl PeerExchange {
         debug!("Got list of peers, conn_id: {}, peers: {:?}", conn_id, peers);
         for peer_address in peers {
             if self.peers_keeper.is_address_known(&peer_address).await {
+                debug!("Address known, continue: {}", peer_address);
                 continue;
             }
             self.connect_to(peer_address).await;
@@ -176,6 +243,8 @@ impl PeerExchange {
     }
 
     pub async fn get_peers(&self) -> Vec<String> {
-        self.peers_keeper.get_peers().await
+        let mut peers = self.peers_keeper.get_peers().await;
+        peers.sort();
+        peers
     }
 }

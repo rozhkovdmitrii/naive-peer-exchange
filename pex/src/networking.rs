@@ -5,7 +5,7 @@ use futures::{
     lock::Mutex as AsyncMutex,
     SinkExt,
 };
-use log::info;
+use log::{debug, info, trace};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -70,8 +70,8 @@ impl Networking for NetworkingImpl {
     }
 
     async fn accept_connections(&self, port: u16) -> Result<(), NetworkError> {
-        Self::accept_connections(self.id_counter.clone(), port, self.event_tx.lock().await.clone())
-            .await
+        let event_tx = { self.event_tx.lock().await.clone() };
+        Self::accept_connections(self.id_counter.clone(), port, event_tx).await
     }
 }
 
@@ -101,6 +101,7 @@ impl NetworkingImpl {
             })?;
         info!("Bound tcp server: {}, {}", ip, port);
         loop {
+            debug!("Wait for the new connection on port:  {}", port);
             let (stream, address) = server
                 .accept()
                 .await
@@ -114,12 +115,15 @@ impl NetworkingImpl {
             ))))
             .await
             .map_err(|error| NetworkError::ChannelError(error.to_string()))?;
+            debug!("Accepted connection sent through the channel: {}", address);
         }
     }
 
     async fn connect_to(&self, address: String) -> JoinHandle<Result<(), NetworkError>> {
         let new_id = self.id_counter.fetch_add(1, Ordering::Release);
-        let mut event_tx = self.event_tx.lock().await.clone();
+        trace!("Got new_id: {}", new_id);
+        let mut event_tx = { self.event_tx.lock().await.clone() };
+        trace!("Got event_tx: {}", new_id);
         spawn(async move {
             let stream = TcpStream::connect(&address).await.map_err(|error| {
                 NetworkError::ConnectingError {

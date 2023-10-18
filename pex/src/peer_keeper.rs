@@ -1,5 +1,6 @@
+use derive_more::Display;
 use futures::lock::{Mutex as AsyncMutex, MutexGuard};
-use log::{debug, error, warn};
+use log::{debug, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,6 +27,18 @@ enum PeerKeeperEvent {
     /// Until the public address is not received through the connection it's considered as invalid
     /// that is why every connection should be checked for the validity after time and be thrown away if it's not
     CheckValidity { conn_id: u64 },
+}
+
+#[derive(Debug, Display)]
+pub(super) enum PeerKeeperError {
+    #[display(
+        fmt = "Failed to accept peer, address already exists: {}, conn_id: {}",
+        address,
+        conn_id
+    )]
+    AddressExists { conn_id: u64, address: String },
+    #[display(fmt = "Connection not found, conn_id: {}", conn_id)]
+    ConnectionNotFound { conn_id: u64 },
 }
 
 impl PeerKeeper {
@@ -60,41 +73,48 @@ impl PeerKeeper {
         }
     }
 
-    pub async fn on_new_peer(&self, peer: Arc<dyn PeerInteractor + Send>) {
+    pub async fn on_new_connection(
+        &self,
+        peer: Arc<dyn PeerInteractor + Send>,
+    ) -> Result<(), PeerKeeperError> {
         let mut guard = self.context.lock().await;
         let conn_id = peer.get_id();
         match guard.connections.try_insert(conn_id, peer) {
             Err(old) => {
                 let conn_id = old.value.get_id();
                 let address = old.value.get_address();
-                error!("Connection rejected: {}, connected from address: {}", conn_id, address);
+                Err(PeerKeeperError::AddressExists {
+                    conn_id,
+                    address: address.to_string(),
+                })
             }
             Ok(new) => {
                 let conn_id = new.get_id();
-                debug!("Peer registered: {} - {}", conn_id, new.get_address());
+                debug!("Connection registered: {} - {}", conn_id, new.get_address());
                 guard.schedule.schedule(VALIDATE_TIMEOUT_TICKS, CheckValidity { conn_id });
+                Ok(())
             }
         }
     }
 
-    pub async fn on_peer_public_address(&self, conn_id: u64, address: String) {
+    pub async fn set_peer_as_valid(
+        &self,
+        conn_id: u64,
+        address: String,
+    ) -> Result<(), PeerKeeperError> {
         let mut guard = self.context.lock().await;
-
         if !guard.connections.contains_key(&conn_id) {
-            error!(
-                "Failed to process public_address: {}, connection not found: {}",
-                address, conn_id
-            );
-            return;
+            return Err(PeerKeeperError::ConnectionNotFound { conn_id });
         };
 
         if let Err(existent) = guard.peers.try_insert(conn_id, address.clone()) {
-            warn!(
-                "Reassigning public address from: {}, to: {} blocked for: {}",
-                existent, address, conn_id
-            );
+            return Err(PeerKeeperError::AddressExists {
+                conn_id,
+                address: existent.value,
+            });
         }
         debug!("Public address: {} - assigned for the connection: {}", address, conn_id);
+        Ok(())
     }
 
     pub(super) async fn on_peer_disconnected(&self, conn_id: u64) {
@@ -120,6 +140,15 @@ impl PeerKeeper {
         guard.peers.values().cloned().collect()
     }
 
+    pub(super) async fn get_valid_conns(&self) -> Vec<Arc<dyn PeerInteractor + Send>> {
+        let guard = self.context.lock().await;
+        let mut conns = vec![];
+        for conn_id in guard.peers.keys() {
+            conns.push(guard.connections.get(conn_id).unwrap().clone())
+        }
+        conns
+    }
+
     pub(super) async fn is_address_known(&self, address: &str) -> bool {
         let context = self.context.lock().await;
 
@@ -129,5 +158,14 @@ impl PeerKeeper {
             }
         }
         false
+    }
+
+    pub(super) async fn get_connection(
+        &self,
+        conn_id: u64,
+    ) -> Result<Arc<dyn PeerInteractor + Send>, PeerKeeperError> {
+        let guard = self.context.lock().await;
+        let conn = guard.connections.get(&conn_id).cloned();
+        conn.ok_or_else(|| PeerKeeperError::ConnectionNotFound { conn_id })
     }
 }
