@@ -1,6 +1,8 @@
 use derive_more::Display;
 use futures::{channel::mpsc::UnboundedSender, lock::Mutex as AsyncMutex, SinkExt, StreamExt};
 use log::debug;
+use rand::distributions::Alphanumeric;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::{
     ops::DerefMut,
     sync::{Arc, Weak},
@@ -69,6 +71,7 @@ pub(super) struct PeerInteractorImpl {
     address: String,
     read: Arc<AsyncMutex<ReadHalf<TcpStream>>>,
     write: Arc<AsyncMutex<WriteHalf<TcpStream>>>,
+    rng: Arc<AsyncMutex<StdRng>>,
 }
 
 impl PeerInteractor for PeerInteractorImpl {
@@ -93,7 +96,7 @@ impl PeerInteractor for PeerInteractorImpl {
         let address = self.address.clone();
         let weak_write = Arc::downgrade(&self.write);
         let conn_id = self.id;
-        spawn(Self::send_random_message_impl(conn_id, address, weak_write))
+        spawn(Self::send_random_message_impl(conn_id, address, weak_write, self.rng.clone()))
     }
 
     fn send_public_address(
@@ -128,6 +131,7 @@ impl PeerInteractorImpl {
             address,
             read: Arc::new(AsyncMutex::new(read)),
             write: Arc::new(AsyncMutex::new(write)),
+            rng: Arc::new(AsyncMutex::new(StdRng::from_entropy())),
         }
     }
 
@@ -214,11 +218,14 @@ impl PeerInteractorImpl {
         conn_id: u64,
         address: String,
         weak_write: Weak<AsyncMutex<WriteHalf<TcpStream>>>,
+        rng: Arc<AsyncMutex<StdRng>>,
     ) -> Result<(), PeerError> {
         debug!("Send random message, conn_id: {}, address: {}", conn_id, address);
-        let message = PeerMessage::RandomMessage {
-            data: "abcde".to_string(),
+        let data: String = {
+            let mut rng = rng.lock().await;
+            (0..10).map(|_| rng.sample(Alphanumeric) as char).collect()
         };
+        let message = PeerMessage::RandomMessage { data };
         Self::send_message(conn_id, message, weak_write).await
     }
 

@@ -1,6 +1,6 @@
 use derive_more::Display;
 use futures::lock::{Mutex as AsyncMutex, MutexGuard};
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -118,7 +118,7 @@ impl PeerKeeper {
         Ok((conn, known_peers))
     }
 
-    pub async fn set_peer_as_valid(
+    pub async fn on_peer_connected(
         &self,
         conn_id: u64,
         address: String,
@@ -132,16 +132,19 @@ impl PeerKeeper {
         conn_id: u64,
         address: String,
     ) -> Result<(), PeerKeeperError> {
-        if !guard.connections.contains_key(&conn_id) {
-            return Err(PeerKeeperError::ConnectionNotFound { conn_id });
-        };
         // It happens if there are cross connections that have not been validated yet
         if let Some(_host_conn_id) = guard.peers.get(&address).cloned() {
             Self::drop_connection_impl(guard, conn_id);
             return Ok(());
         }
+        let Some(mut conn_info) = guard.connections.get_mut(&conn_id) else {
+            return Err(PeerKeeperError::ConnectionNotFound { conn_id });
+        };
+        conn_info.address = Some(address.clone());
         assert!(guard.peers.insert(address.clone(), conn_id).is_none());
+
         debug!("Public address: {} - assigned for the connection: {}", address, conn_id);
+        info!("Connected to the peer at: {}", address);
         Ok(())
     }
 
@@ -206,5 +209,11 @@ impl PeerKeeper {
         conn_info
             .map(|conn_info| conn_info.conn.clone())
             .ok_or(PeerKeeperError::ConnectionNotFound { conn_id })
+    }
+
+    pub(super) async fn get_peer_address(&self, conn_id: u64) -> Option<String> {
+        let context = self.context.lock().await;
+        let conn_info = context.connections.get(&conn_id)?;
+        conn_info.address.clone()
     }
 }

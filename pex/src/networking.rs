@@ -99,14 +99,14 @@ impl NetworkingImpl {
                 port,
                 error: err.to_string(),
             })?;
-        info!("Bound tcp server: {}, {}", ip, port);
+        info!("My address is: {}:{}", ip, port);
         loop {
             debug!("Wait for the new connection on port:  {}", port);
             let (stream, address) = server
                 .accept()
                 .await
                 .map_err(|error| NetworkError::AcceptError(error.to_string()))?;
-            info!("Successfully accepted connection: {}", address);
+            debug!("Successfully accepted connection: {}", address);
             let id = id_counter.fetch_add(1, Ordering::Release);
             tx.send(NetworkEvent::Accepted(Box::new(PeerInteractorImpl::new(
                 id,

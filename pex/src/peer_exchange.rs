@@ -162,7 +162,7 @@ impl PeerExchange {
             error!("Failed to register connection: {}", error);
             return;
         }
-        if let Err(error) = self.peers_keeper.set_peer_as_valid(conn_id, address).await {
+        if let Err(error) = self.peers_keeper.on_peer_connected(conn_id, address).await {
             error!("{} - Failed to set_peer_as_valid: {}", self.self_address(), error);
             return;
         };
@@ -196,14 +196,14 @@ impl PeerExchange {
     }
 
     async fn on_public_address(&self, conn_id: u64, address: String) {
-        let (conn, known_peers) = match self.peers_keeper.on_public_address(conn_id, address).await
-        {
-            Ok(result) => result,
-            Err(error) => {
-                error!("{}", error);
-                return;
-            }
-        };
+        let (conn, known_peers) =
+            match self.peers_keeper.on_public_address(conn_id, address.clone()).await {
+                Ok(result) => result,
+                Err(error) => {
+                    error!("{}", error);
+                    return;
+                }
+            };
         if known_peers.is_empty() {
             return;
         }
@@ -217,7 +217,12 @@ impl PeerExchange {
     }
 
     async fn on_random_message(&self, conn_id: u64, message_data: String) {
-        info!("Got message_data, conn_id: {}, data: {}", conn_id, message_data);
+        debug!("Got message_data, conn_id: {}, data: {}", conn_id, message_data);
+        let Some(address) = self.peers_keeper.get_peer_address(conn_id).await else {
+            // ignore until address is known 
+            return;
+        };
+        info!("Received message [{}] from: {}", message_data, address);
     }
 
     async fn on_konwn_peers(&self, conn_id: u64, peers: Vec<String>) {
