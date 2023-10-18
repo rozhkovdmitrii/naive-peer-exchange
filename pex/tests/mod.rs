@@ -1,8 +1,7 @@
-//use log::LevelFilter;
 use pex::{NetworkingImpl, PeerExchange, PeerExchangeConfig};
+use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
-//use std::time::Instant;
 use tokio::spawn;
 
 // fn init_logging() {
@@ -15,7 +14,7 @@ use tokio::spawn;
 // }
 
 #[tokio::test]
-async fn test_single_connection() {
+async fn test_couple_peers_network() {
     let peer1 = Arc::new(PeerExchange::new(
         PeerExchangeConfig::new("127.0.0.1", 8080, 2, None),
         <Box<NetworkingImpl>>::default(),
@@ -30,13 +29,13 @@ async fn test_single_connection() {
     spawn(async move { peer1_copy.execute().await });
     let peer2_copy = peer2.clone();
     spawn(async move { peer2_copy.execute().await });
-    tokio::time::sleep(Duration::from_millis(1)).await;
+    tokio::time::sleep(Duration::from_millis(10)).await;
     assert_eq!(peer2.get_peers().await, vec!["127.0.0.1:8080"]);
     assert_eq!(peer1.get_peers().await, vec!["127.0.0.1:8081"]);
 }
 
 #[tokio::test]
-async fn test_triple_connection() {
+async fn test_a_few_peers_network() {
     let peer1 = Arc::new(PeerExchange::new(
         PeerExchangeConfig::new("127.0.0.1", 8082, 2, None),
         <Box<NetworkingImpl>>::default(),
@@ -68,16 +67,12 @@ async fn test_triple_connection() {
     let peer5_copy = peer5.clone();
 
     spawn(async move { peer1_copy.execute().await });
-    tokio::time::sleep(Duration::from_millis(100)).await;
     spawn(async move { peer2_copy.execute().await });
-    tokio::time::sleep(Duration::from_millis(100)).await;
     spawn(async move { peer3_copy.execute().await });
-    tokio::time::sleep(Duration::from_millis(100)).await;
     spawn(async move { peer4_copy.execute().await });
-    tokio::time::sleep(Duration::from_millis(100)).await;
     spawn(async move { peer5_copy.execute().await });
+    tokio::time::sleep(Duration::from_millis(10)).await;
 
-    tokio::time::sleep(Duration::from_millis(5)).await;
     assert_eq!(
         peer1.get_peers().await,
         vec![
@@ -108,8 +103,8 @@ async fn test_triple_connection() {
 }
 
 #[tokio::test]
-async fn test_multiple_connection() {
-    let ports_range = 8081..8100;
+async fn test_many_peers_network() {
+    let ports_range = 8090..8130;
     let ports: Vec<u16> = ports_range.into_iter().collect();
     let base = Arc::new(PeerExchange::new(
         PeerExchangeConfig::new("127.0.0.1", 8080, 1, None),
@@ -128,33 +123,22 @@ async fn test_multiple_connection() {
     }
 
     for peer in peers.iter().cloned() {
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(1)).await;
+
         spawn(async move { peer.execute().await });
     }
-    tokio::time::sleep(Duration::from_millis(1)).await;
-    for peer in peers.iter().by_ref() {
-        println!("{:?}", peer.get_peers().await)
-    }
-    tokio::time::sleep(Duration::from_millis(2)).await;
-    println!("------------------");
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
-    for peer in peers.iter().by_ref() {
-        println!("{:?}", peer.get_peers().await)
-    }
-    tokio::time::sleep(Duration::from_millis(3)).await;
-    println!("------------------");
-    for peer in peers.iter().by_ref() {
-        println!("{:?}", peer.get_peers().await)
-    }
-    tokio::time::sleep(Duration::from_millis(3)).await;
-    println!("------------------");
-    for peer in peers.iter().by_ref() {
-        println!("{:?}", peer.get_peers().await)
-    }
-    tokio::time::sleep(Duration::from_millis(3)).await;
-    println!("------------------");
+    for (i, peer) in peers.iter().enumerate() {
+        let expected: Vec<String> = once(&8080_u16)
+            .chain(ports[..i].iter())
+            .chain(ports[i + 1..].iter())
+            .map(|port| format!("127.0.0.1:{}", port))
+            .collect();
 
-    for peer in peers {
-        println!("{:?}", peer.get_peers().await)
+        println!("{:?}", expected);
+        let info = peer.get_peers_and_conn_ids().await;
+        println!("{:?}", info);
+        assert_eq!(peer.get_peers().await, expected);
     }
 }

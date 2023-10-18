@@ -1,7 +1,6 @@
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::lock::Mutex as AsyncMutex;
-use futures::stream::FuturesUnordered;
-use futures::StreamExt;
+use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, error, info};
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,7 +12,7 @@ use crate::peer_interactor::PeerEvent;
 use crate::peer_keeper::PeerKeeper;
 use crate::{NetworkError, NetworkEvent, PeerError, PeerExchangeConfig, PeerInteractor};
 
-const CHECK_PEER_RESULTS_TIMEOUT_MILLIS: u64 = 10;
+const CHECK_TASK_RESULTS_TIMEOUT_MICROS: u64 = 10;
 
 pub struct PeerExchange {
     config: PeerExchangeConfig,
@@ -79,9 +78,14 @@ impl PeerExchange {
 
     async fn check_peer_results(&self) -> Result<(), JoinError> {
         loop {
-            let handle = { self.peer_handles.lock().await.next().await };
+            tokio::time::sleep(Duration::from_micros(CHECK_TASK_RESULTS_TIMEOUT_MICROS)).await;
+            let mut peer_handles = self.peer_handles.lock().await;
+            let mut handle = select! (
+                handle = peer_handles.next() => handle,
+                _ = tokio::time::sleep(Duration::from_micros(1)) => {continue}
+            );
+            // No more futures are currently running
             let Some(handle) = handle else {
-                tokio::time::sleep(Duration::from_millis(CHECK_PEER_RESULTS_TIMEOUT_MILLIS)).await;
                 continue;
             };
             match handle? {
@@ -93,9 +97,14 @@ impl PeerExchange {
 
     async fn check_connect_results(&self) -> Result<(), JoinError> {
         loop {
-            let handle = { self.connect_handles.lock().await.next().await };
+            tokio::time::sleep(Duration::from_micros(CHECK_TASK_RESULTS_TIMEOUT_MICROS)).await;
+            let mut connect_handles = self.connect_handles.lock().await;
+            let mut handle = select! (
+                handle = connect_handles.next() => handle,
+                _ = tokio::time::sleep(Duration::from_micros(1)) => {continue}
+            );
+            // No more futures are currently running
             let Some(handle) = handle else {
-                tokio::time::sleep(Duration::from_millis(CHECK_PEER_RESULTS_TIMEOUT_MILLIS)).await;
                 continue;
             };
             match handle? {
@@ -118,9 +127,7 @@ impl PeerExchange {
                     conn.get_id()
                 );
                 let send_handle = conn.send_random_message();
-                {
-                    self.peer_handles.lock().await.push(send_handle);
-                }
+                self.peer_handles.lock().await.push(send_handle);
             }
         }
     }
@@ -155,13 +162,10 @@ impl PeerExchange {
             return;
         };
         let listen_handle = peer.start_listen_messages(peer_event_tx.clone());
-        // {
-        //     self.peer_handles.lock().await.push(listen_handle);
-        // }
+        self.peer_handles.lock().await.push(listen_handle);
+
         let send_handle = peer.send_public_address(self.config.address.clone(), self.config.port);
-        // {
-        //     self.peer_handles.lock().await.push(send_handle);
-        // }
+        self.peer_handles.lock().await.push(send_handle);
     }
 
     async fn on_peer_accepted(
@@ -178,9 +182,7 @@ impl PeerExchange {
             return;
         }
         let listen_handle = peer.start_listen_messages(peer_event_tx.clone());
-        // {
-        //     self.peer_handles.lock().await.push(listen_handle)
-        // };
+        self.peer_handles.lock().await.push(listen_handle);
     }
 
     async fn on_peer_public_address(&self, conn_id: u64, address: String) {
@@ -194,10 +196,9 @@ impl PeerExchange {
         }
         let conn = self.peers_keeper.get_connection(conn_id).await;
         let conn = conn.expect("Expected connection be able to be found");
+
         let send_handle = conn.send_known_peers(known_peers);
-        {
-            self.peer_handles.lock().await.push(send_handle)
-        };
+        self.peer_handles.lock().await.push(send_handle)
     }
 
     async fn on_peer_disconnected(&self, conn_id: u64) {
@@ -244,6 +245,11 @@ impl PeerExchange {
 
     pub async fn get_peers(&self) -> Vec<String> {
         let mut peers = self.peers_keeper.get_peers().await;
+        peers.sort();
+        peers
+    }
+    pub async fn get_peers_and_conn_ids(&self) -> Vec<(u64, String)> {
+        let mut peers = self.peers_keeper.get_peers_and_conn_ids().await;
         peers.sort();
         peers
     }

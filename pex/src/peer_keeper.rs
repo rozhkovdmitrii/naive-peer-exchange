@@ -140,6 +140,11 @@ impl PeerKeeper {
         guard.peers.values().cloned().collect()
     }
 
+    pub(super) async fn get_peers_and_conn_ids(&self) -> Vec<(u64, String)> {
+        let guard = self.context.lock().await;
+        guard.peers.iter().map(|(conn_id, address)| (*conn_id, address.clone())).collect()
+    }
+
     pub(super) async fn get_valid_conns(&self) -> Vec<Arc<dyn PeerInteractor + Send>> {
         let guard = self.context.lock().await;
         let mut conns = vec![];

@@ -18,7 +18,7 @@ use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use super::rpc_data::PeerMessage;
 
 const PEER_BUFFER_SIZE: usize = 10;
-const RELEASE_PEER_READ_TIMEOUT_MILLIS: u64 = 100;
+const RELEASE_PEER_READ_TIMEOUT_MILLIS: u64 = 10;
 
 #[derive(Debug, Display)]
 #[display(fmt = "{}. conn_id: {}", error, conn_id)]
