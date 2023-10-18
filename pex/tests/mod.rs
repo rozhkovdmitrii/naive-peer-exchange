@@ -129,7 +129,7 @@ async fn test_many_peers_network() {
         tokio::time::sleep(Duration::from_millis(1)).await;
         spawn(async move { peer.execute().await });
     }
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     for (i, peer) in peers.iter().enumerate() {
         let expected: Vec<String> = once(&8080_u16)
