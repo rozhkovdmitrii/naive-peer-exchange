@@ -1,17 +1,18 @@
+use log::LevelFilter;
 use pex::{NetworkingImpl, PeerExchange, PeerExchangeConfig};
 use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::spawn;
 
-// fn init_logging() {
-//     let mut builder = env_logger::builder();
-//     let level = std::env::var("RUST_LOG")
-//         .map(|s| s.parse().expect("Failed to parse RUST_LOG"))
-//         .unwrap_or(LevelFilter::Info);
-//     builder.filter_level(level).format_level(true).format_target(true);
-//     builder.init();
-// }
+fn init_logging() {
+    let mut builder = env_logger::builder();
+    let level = std::env::var("RUST_LOG")
+        .map(|s| s.parse().expect("Failed to parse RUST_LOG"))
+        .unwrap_or(LevelFilter::Off);
+    builder.filter_level(level).format_level(true).format_target(true);
+    builder.init();
+}
 
 #[tokio::test]
 async fn test_couple_peers_network() {
@@ -104,7 +105,9 @@ async fn test_a_few_peers_network() {
 
 #[tokio::test]
 async fn test_many_peers_network() {
-    let ports_range = 8090..8130;
+    init_logging();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let ports_range = 8090..8120;
     let ports: Vec<u16> = ports_range.into_iter().collect();
     let base = Arc::new(PeerExchange::new(
         PeerExchangeConfig::new("127.0.0.1", 8080, 1, None),
@@ -124,10 +127,9 @@ async fn test_many_peers_network() {
 
     for peer in peers.iter().cloned() {
         tokio::time::sleep(Duration::from_millis(1)).await;
-
         spawn(async move { peer.execute().await });
     }
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
 
     for (i, peer) in peers.iter().enumerate() {
         let expected: Vec<String> = once(&8080_u16)
@@ -136,9 +138,7 @@ async fn test_many_peers_network() {
             .map(|port| format!("127.0.0.1:{}", port))
             .collect();
 
-        println!("{:?}", expected);
-        let info = peer.get_peers_and_conn_ids().await;
-        println!("{:?}", info);
+        let _info = peer.get_peers_and_conn_ids().await;
         assert_eq!(peer.get_peers().await, expected);
     }
 }

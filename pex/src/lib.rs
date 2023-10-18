@@ -1,3 +1,4 @@
+#![feature(drain_filter)]
 #![feature(map_try_insert)]
 
 mod networking;

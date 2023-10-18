@@ -10,7 +10,7 @@ use crate::peer_keeper::PeerKeeperEvent::CheckValidity;
 use crate::PeerInteractor;
 
 const KEEPER_SCHEDULE_CAPACITY: usize = 100_000;
-const VALIDATE_TIMEOUT_TICKS: usize = 1;
+const VALIDATE_TIMEOUT_TICKS: usize = 3;
 const KEEPER_TIME_WHEEL_TIC_SEC: u64 = 1;
 
 pub(super) struct PeerKeeper {
@@ -106,7 +106,6 @@ impl PeerKeeper {
         if !guard.connections.contains_key(&conn_id) {
             return Err(PeerKeeperError::ConnectionNotFound { conn_id });
         };
-
         if let Err(existent) = guard.peers.try_insert(conn_id, address.clone()) {
             return Err(PeerKeeperError::AddressExists {
                 conn_id,

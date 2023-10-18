@@ -1,7 +1,7 @@
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::lock::Mutex as AsyncMutex;
 use futures::stream::{FuturesUnordered, StreamExt};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
@@ -63,13 +63,13 @@ impl PeerExchange {
         while let Some(peer_event) = peer_event_rx.next().await {
             match peer_event {
                 PeerEvent::PublicAddress { conn_id, address } => {
-                    self.on_peer_public_address(conn_id, address).await;
+                    self.on_public_address(conn_id, address).await;
                 }
                 PeerEvent::RandomMessage { conn_id, data } => {
                     self.on_random_message(conn_id, data).await
                 }
                 PeerEvent::KnownPeers { conn_id, peers } => {
-                    self.on_list_of_peers(conn_id, peers).await
+                    self.on_konwn_peers(conn_id, peers).await
                 }
                 PeerEvent::Disconnected { conn_id } => self.on_peer_disconnected(conn_id).await,
             }
@@ -80,7 +80,7 @@ impl PeerExchange {
         loop {
             tokio::time::sleep(Duration::from_micros(CHECK_TASK_RESULTS_TIMEOUT_MICROS)).await;
             let mut peer_handles = self.peer_handles.lock().await;
-            let mut handle = select! (
+            let handle = select! (
                 handle = peer_handles.next() => handle,
                 _ = tokio::time::sleep(Duration::from_micros(1)) => {continue}
             );
@@ -99,7 +99,7 @@ impl PeerExchange {
         loop {
             tokio::time::sleep(Duration::from_micros(CHECK_TASK_RESULTS_TIMEOUT_MICROS)).await;
             let mut connect_handles = self.connect_handles.lock().await;
-            let mut handle = select! (
+            let handle = select! (
                 handle = connect_handles.next() => handle,
                 _ = tokio::time::sleep(Duration::from_micros(1)) => {continue}
             );
@@ -185,18 +185,21 @@ impl PeerExchange {
         self.peer_handles.lock().await.push(listen_handle);
     }
 
-    async fn on_peer_public_address(&self, conn_id: u64, address: String) {
-        let known_peers = self.peers_keeper.get_peers().await;
-        if let Err(error) = self.peers_keeper.set_peer_as_valid(conn_id, address).await {
+    async fn on_public_address(&self, conn_id: u64, address: String) {
+        // This address could be wrong and send by the malicious person that is why connection
+        // should be proved by the negotiation procedure that is due to be implemented in the future
+        if let Err(error) = self.peers_keeper.set_peer_as_valid(conn_id, address.clone()).await {
             error!("Failed process public address: {}", error);
             return;
         };
+        let mut known_peers = self.peers_keeper.get_peers().await;
         if known_peers.is_empty() {
             return;
         }
+
         let conn = self.peers_keeper.get_connection(conn_id).await;
         let conn = conn.expect("Expected connection be able to be found");
-
+        known_peers.drain_filter(|peer_address| peer_address.as_str() == address.as_str());
         let send_handle = conn.send_known_peers(known_peers);
         self.peer_handles.lock().await.push(send_handle)
     }
@@ -210,9 +213,16 @@ impl PeerExchange {
         info!("Got message_data, conn_id: {}, data: {}", conn_id, message_data);
     }
 
-    async fn on_list_of_peers(&self, conn_id: u64, peers: Vec<String>) {
+    async fn on_konwn_peers(&self, conn_id: u64, peers: Vec<String>) {
         debug!("Got list of peers, conn_id: {}, peers: {:?}", conn_id, peers);
         for peer_address in peers {
+            if peer_address == self.self_address() {
+                warn!(
+                    "Address that is the same as current peer is listening on rejected: {}",
+                    peer_address
+                );
+                continue;
+            }
             if self.peers_keeper.is_address_known(&peer_address).await {
                 debug!("Address known, continue: {}", peer_address);
                 continue;
@@ -248,9 +258,14 @@ impl PeerExchange {
         peers.sort();
         peers
     }
+
     pub async fn get_peers_and_conn_ids(&self) -> Vec<(u64, String)> {
         let mut peers = self.peers_keeper.get_peers_and_conn_ids().await;
         peers.sort();
         peers
+    }
+
+    fn self_address(&self) -> String {
+        format!("{}:{}", self.config.address, self.config.port)
     }
 }
