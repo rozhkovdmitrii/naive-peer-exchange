@@ -1,6 +1,6 @@
 use derive_more::Display;
 use futures::{channel::mpsc::UnboundedSender, lock::Mutex as AsyncMutex, SinkExt, StreamExt};
-use log::{debug, error};
+use log::debug;
 use std::{
     ops::DerefMut,
     sync::{Arc, Weak},
@@ -137,7 +137,6 @@ impl PeerInteractorImpl {
         peer_event_tx: &UnboundedSender<PeerEvent>,
     ) -> Result<bool, PeerError> {
         let Some(message) = message else {
-            error!("!!!!!!!!!!!!!!!!!: {:?}", peer_event_tx);
             peer_event_tx.unbounded_send(PeerEvent::Disconnected { conn_id }).map_err(|error| PeerError::new(conn_id, PeerErrorImpl::ChannelError(error.to_string())))?;
             return Ok(false)
         };
@@ -146,7 +145,6 @@ impl PeerInteractorImpl {
         })?;
         let peer_event = PeerEvent::from_message(conn_id, peer_message);
         peer_event_tx.unbounded_send(peer_event).map_err(|error| {
-            error!("ddddddddddddddddddddddddddddd");
             PeerError::new(conn_id, PeerErrorImpl::ChannelError(error.to_string()))
         })?;
         Ok(true)
@@ -182,7 +180,6 @@ impl PeerInteractorImpl {
                 _ = tokio::time::sleep(Duration::from_millis(RELEASE_PEER_READ_TIMEOUT_MILLIS)) => { continue }
             )
         }
-        debug!("Recv data has finished processing");
         Ok(())
     }
 

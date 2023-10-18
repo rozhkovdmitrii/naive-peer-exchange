@@ -1,5 +1,6 @@
 use log::LevelFilter;
 use pex::{NetworkingImpl, PeerExchange, PeerExchangeConfig};
+use rand::{thread_rng, Rng};
 use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,11 +12,12 @@ fn init_logging() {
         .map(|s| s.parse().expect("Failed to parse RUST_LOG"))
         .unwrap_or(LevelFilter::Off);
     builder.filter_level(level).format_level(true).format_target(true);
-    builder.init();
+    let _ = builder.try_init();
 }
 
 #[tokio::test]
 async fn test_couple_peers_network() {
+    init_logging();
     let peer1 = Arc::new(PeerExchange::new(
         PeerExchangeConfig::new("127.0.0.1", 8080, 2, None),
         <Box<NetworkingImpl>>::default(),
@@ -37,6 +39,7 @@ async fn test_couple_peers_network() {
 
 #[tokio::test]
 async fn test_a_few_peers_network() {
+    init_logging();
     let peer1 = Arc::new(PeerExchange::new(
         PeerExchangeConfig::new("127.0.0.1", 8082, 2, None),
         <Box<NetworkingImpl>>::default(),
@@ -106,33 +109,41 @@ async fn test_a_few_peers_network() {
 #[tokio::test]
 async fn test_many_peers_network() {
     init_logging();
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    let ports_range = 8090..8120;
+    const COUNT: u16 = 20;
+    const BASE_PORT: u16 = 8089;
+    let ports_range = BASE_PORT + 1..BASE_PORT + 1 + COUNT;
     let ports: Vec<u16> = ports_range.into_iter().collect();
     let base = Arc::new(PeerExchange::new(
-        PeerExchangeConfig::new("127.0.0.1", 8080, 1, None),
+        PeerExchangeConfig::new("127.0.0.1", BASE_PORT, 1, None),
         <Box<NetworkingImpl>>::default(),
     ));
     let base_copy = base.clone();
 
     spawn(async move { base_copy.execute().await });
     let mut peers = vec![];
-    for port in ports.iter().by_ref() {
+    let mut rng = thread_rng();
+    for (i, port) in ports.iter().by_ref().enumerate() {
+        let connect_port = if i == 0 {
+            BASE_PORT
+        } else {
+            ports[rng.gen::<usize>() % i]
+        };
+        let connect_to = format!("127.0.0.1:{}", connect_port);
         let peer = Arc::new(PeerExchange::new(
-            PeerExchangeConfig::new("127.0.0.1", *port, 1, Some("127.0.0.1:8080")),
+            PeerExchangeConfig::new("127.0.0.1", *port, 1, Some(&connect_to)),
             <Box<NetworkingImpl>>::default(),
         ));
         peers.push(peer);
     }
 
     for peer in peers.iter().cloned() {
-        tokio::time::sleep(Duration::from_millis(1)).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
         spawn(async move { peer.execute().await });
     }
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     for (i, peer) in peers.iter().enumerate() {
-        let expected: Vec<String> = once(&8080_u16)
+        let expected: Vec<String> = once(&BASE_PORT)
             .chain(ports[..i].iter())
             .chain(ports[i + 1..].iter())
             .map(|port| format!("127.0.0.1:{}", port))

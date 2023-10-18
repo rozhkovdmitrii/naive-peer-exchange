@@ -49,17 +49,6 @@ pub(super) enum PeerKeeperError {
     ConnIdExists { conn_id: u64 },
     #[display(fmt = "Connection not found, conn_id: {}", conn_id)]
     ConnectionNotFound { conn_id: u64 },
-    #[display(
-        fmt = "Public address: {} - is already owned by: {}, rejected for: {}",
-        address,
-        host_conn_id,
-        conn_id
-    )]
-    ConflictingAddress {
-        address: String,
-        host_conn_id: u64,
-        conn_id: u64,
-    },
 }
 
 impl PeerKeeper {
@@ -114,21 +103,42 @@ impl PeerKeeper {
         }
     }
 
+    pub(super) async fn on_public_address(
+        &self,
+        conn_id: u64,
+        address: String,
+    ) -> Result<(Arc<dyn PeerInteractor + Send>, Vec<String>), PeerKeeperError> {
+        // This address could be wrong and send by the malicious person that is why connection
+        // should be proved by the negotiation procedure that is due to be implemented in the future
+        let mut guard = self.context.lock().await;
+        Self::set_peer_as_valid_impl(&mut guard, conn_id, address.clone())?;
+        let conn = Self::get_connection_impl(&mut guard, conn_id)?;
+        let mut known_peers = Self::get_peers_impl(&mut guard);
+        known_peers.drain_filter(|peer_address| peer_address.as_str() == address.as_str());
+        Ok((conn, known_peers))
+    }
+
     pub async fn set_peer_as_valid(
         &self,
         conn_id: u64,
         address: String,
     ) -> Result<(), PeerKeeperError> {
         let mut guard = self.context.lock().await;
+        Self::set_peer_as_valid_impl(&mut guard, conn_id, address)
+    }
+
+    fn set_peer_as_valid_impl(
+        guard: &mut MutexGuard<'_, PeerKeeperContex>,
+        conn_id: u64,
+        address: String,
+    ) -> Result<(), PeerKeeperError> {
         if !guard.connections.contains_key(&conn_id) {
             return Err(PeerKeeperError::ConnectionNotFound { conn_id });
         };
-        if let Some(host_conn_id) = guard.peers.get(&address).cloned() {
-            return Err(PeerKeeperError::ConflictingAddress {
-                address,
-                host_conn_id,
-                conn_id,
-            });
+        // It happens if there are cross connections that have not been validated yet
+        if let Some(_host_conn_id) = guard.peers.get(&address).cloned() {
+            Self::drop_connection_impl(guard, conn_id);
+            return Ok(());
         }
         assert!(guard.peers.insert(address.clone(), conn_id).is_none());
         debug!("Public address: {} - assigned for the connection: {}", address, conn_id);
@@ -145,6 +155,10 @@ impl PeerKeeper {
 
     async fn drop_connection(&self, conn_id: u64) {
         let mut guard = self.context.lock().await;
+        Self::drop_connection_impl(&mut guard, conn_id)
+    }
+
+    fn drop_connection_impl(guard: &mut MutexGuard<'_, PeerKeeperContex>, conn_id: u64) {
         let Some(conn_info) = guard.connections.remove(&conn_id) else {
             warn!("Nothing removed from the registry by the conn_id: {}", conn_id);
             return;
@@ -156,7 +170,11 @@ impl PeerKeeper {
     }
 
     pub(super) async fn get_peers(&self) -> Vec<String> {
-        let guard = self.context.lock().await;
+        let mut guard = self.context.lock().await;
+        Self::get_peers_impl(&mut guard)
+    }
+
+    fn get_peers_impl(guard: &mut MutexGuard<'_, PeerKeeperContex>) -> Vec<String> {
         guard.peers.keys().cloned().collect()
     }
 
@@ -167,18 +185,12 @@ impl PeerKeeper {
 
     pub(super) async fn get_valid_conns(&self) -> Vec<Arc<dyn PeerInteractor + Send>> {
         let guard = self.context.lock().await;
-        let mut conns = vec![];
-        for conn_id in guard.peers.values() {
-            conns.push(
-                guard
-                    .connections
-                    .get(conn_id)
-                    .map(|conn_info| conn_info.conn.clone())
-                    .expect("Expected connection to be in the registry")
-                    .clone(),
-            )
-        }
-        conns
+        guard
+            .connections
+            .values()
+            .filter(|conn_info| conn_info.address.is_some())
+            .map(|conn_info| conn_info.conn.clone())
+            .collect()
     }
 
     pub(super) async fn is_address_known(&self, address: &str) -> bool {
@@ -186,14 +198,13 @@ impl PeerKeeper {
         context.peers.contains_key(address)
     }
 
-    pub(super) async fn get_connection(
-        &self,
+    fn get_connection_impl(
+        guard: &mut MutexGuard<'_, PeerKeeperContex>,
         conn_id: u64,
     ) -> Result<Arc<dyn PeerInteractor + Send>, PeerKeeperError> {
-        let guard = self.context.lock().await;
         let conn_info = guard.connections.get(&conn_id);
         conn_info
             .map(|conn_info| conn_info.conn.clone())
-            .ok_or_else(|| PeerKeeperError::ConnectionNotFound { conn_id })
+            .ok_or(PeerKeeperError::ConnectionNotFound { conn_id })
     }
 }

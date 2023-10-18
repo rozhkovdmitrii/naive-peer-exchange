@@ -43,8 +43,8 @@ impl PeerExchange {
             _ = self.peers_keeper.execute() => { error!("Peer keeping processing unexpectedly interrupted") },
             r = self.networking.accept_connections(self.config.port) => { if let Err(error) = r { error!("Accepting connections unexpectedly interrupted: {}", error) }},
             _ = self.process_peer_events(peer_event_rx) => { error!("Peer events processing unexpectedly interrupted")}
-            r = self.check_peer_results() => { if let Err(error) = r { error!("Checking peer results unexpectedly interrupted: {}", error); } }
-            r = self.check_connect_results() => { if let Err(error) = r { error!("Checking connecting results unexpectedly interrupted: {}", error); } }
+            r = self.process_peer_results() => { if let Err(error) = r { error!("Checking peer results unexpectedly interrupted: {}", error); } }
+            r = self.process_connecting_results() => { if let Err(error) = r { error!("Checking connecting results unexpectedly interrupted: {}", error); } }
             _ = self.messaging_loop() => { error!("Messaging loop unexpectedly interrupted")}
         );
     }
@@ -76,7 +76,7 @@ impl PeerExchange {
         }
     }
 
-    async fn check_peer_results(&self) -> Result<(), JoinError> {
+    async fn process_peer_results(&self) -> Result<(), JoinError> {
         loop {
             tokio::time::sleep(Duration::from_micros(CHECK_TASK_RESULTS_TIMEOUT_MICROS)).await;
             let mut peer_handles = self.peer_handles.lock().await;
@@ -95,7 +95,7 @@ impl PeerExchange {
         }
     }
 
-    async fn check_connect_results(&self) -> Result<(), JoinError> {
+    async fn process_connecting_results(&self) -> Result<(), JoinError> {
         loop {
             tokio::time::sleep(Duration::from_micros(CHECK_TASK_RESULTS_TIMEOUT_MICROS)).await;
             let mut connect_handles = self.connect_handles.lock().await;
@@ -152,13 +152,18 @@ impl PeerExchange {
         let peer: Arc<dyn PeerInteractor + Send> = peer.into();
         let conn_id = peer.get_id();
         let address = peer.get_address().to_string();
-        debug!("peer connected, conn_id: {}, address: {}", conn_id, address);
+        debug!(
+            "{} - peer connected, conn_id: {}, remote address: {}",
+            self.self_address(),
+            conn_id,
+            address
+        );
         if let Err(error) = self.peers_keeper.on_new_connection(peer.clone()).await {
             error!("Failed to register connection: {}", error);
             return;
         }
         if let Err(error) = self.peers_keeper.set_peer_as_valid(conn_id, address).await {
-            error!("Failed to set_peer_as_valid: {}", error);
+            error!("{} - Failed to set_peer_as_valid: {}", self.self_address(), error);
             return;
         };
         let listen_handle = peer.start_listen_messages(peer_event_tx.clone());
@@ -176,7 +181,12 @@ impl PeerExchange {
         let peer: Arc<dyn PeerInteractor + Send> = peer.into();
         let conn_id = peer.get_id();
         let address = peer.get_address().to_string();
-        debug!("peer accepted, conn_id: {}, address: {}", conn_id, address);
+        debug!(
+            "{} - peer accepted, conn_id: {}, remote address: {}",
+            self.self_address(),
+            conn_id,
+            address
+        );
         if let Err(error) = self.peers_keeper.on_new_connection(peer.clone()).await {
             error!("{}", error);
             return;
@@ -186,26 +196,23 @@ impl PeerExchange {
     }
 
     async fn on_public_address(&self, conn_id: u64, address: String) {
-        // This address could be wrong and send by the malicious person that is why connection
-        // should be proved by the negotiation procedure that is due to be implemented in the future
-        if let Err(error) = self.peers_keeper.set_peer_as_valid(conn_id, address.clone()).await {
-            error!("Failed process public address: {}", error);
-            return;
+        let (conn, known_peers) = match self.peers_keeper.on_public_address(conn_id, address).await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                error!("{}", error);
+                return;
+            }
         };
-        let mut known_peers = self.peers_keeper.get_peers().await;
         if known_peers.is_empty() {
             return;
         }
-
-        let conn = self.peers_keeper.get_connection(conn_id).await;
-        let conn = conn.expect("Expected connection be able to be found");
-        known_peers.drain_filter(|peer_address| peer_address.as_str() == address.as_str());
         let send_handle = conn.send_known_peers(known_peers);
         self.peer_handles.lock().await.push(send_handle)
     }
 
     async fn on_peer_disconnected(&self, conn_id: u64) {
-        info!("Got disconnected event, conn_id: {}", conn_id);
+        debug!("{} - peer disconnected, conn_id: {}", self.self_address(), conn_id);
         self.peers_keeper.on_peer_disconnected(conn_id).await
     }
 
@@ -224,7 +231,6 @@ impl PeerExchange {
                 continue;
             }
             if self.peers_keeper.is_address_known(&peer_address).await {
-                debug!("Address known, continue: {}", peer_address);
                 continue;
             }
             self.connect_to(peer_address).await;
@@ -232,12 +238,12 @@ impl PeerExchange {
     }
 
     async fn on_peer_error(&self, peer_error: PeerError) {
-        error!("{}", peer_error);
+        error!("{} - {}", self.self_address(), peer_error);
         self.peers_keeper.on_peer_error(peer_error.conn_id).await
     }
 
     async fn on_connect_error(&self, connect_error: NetworkError) {
-        error!("{}", connect_error);
+        error!("{} - {}", self.self_address(), connect_error);
     }
 
     async fn init_peer(&self) {
@@ -248,7 +254,7 @@ impl PeerExchange {
     }
 
     async fn connect_to(&self, address: String) {
-        info!("Connecting to the peer: {}", address);
+        debug!("{} - Connecting to the peer: {}", self.self_address(), address);
         let handle = self.networking.connect_to(address).await;
         self.connect_handles.lock().await.push(handle);
     }

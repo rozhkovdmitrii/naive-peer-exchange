@@ -5,7 +5,7 @@ use futures::{
     lock::Mutex as AsyncMutex,
     SinkExt,
 };
-use log::{debug, info, trace};
+use log::{debug, info};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -121,9 +121,7 @@ impl NetworkingImpl {
 
     async fn connect_to(&self, address: String) -> JoinHandle<Result<(), NetworkError>> {
         let new_id = self.id_counter.fetch_add(1, Ordering::Release);
-        trace!("Got new_id: {}", new_id);
         let mut event_tx = { self.event_tx.lock().await.clone() };
-        trace!("Got event_tx: {}", new_id);
         spawn(async move {
             let stream = TcpStream::connect(&address).await.map_err(|error| {
                 NetworkError::ConnectingError {
