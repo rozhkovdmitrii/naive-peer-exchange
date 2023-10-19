@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "pex",
-    "pex_app"
+    "naive-p2p-lib",
+    "naive-p2p"
 ]

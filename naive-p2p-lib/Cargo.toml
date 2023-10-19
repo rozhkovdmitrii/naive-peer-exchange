@@ -1,5 +1,5 @@
 [package]
-name = "pex"
+name = "naive_p2p_lib"
 version = "0.1.0"
 edition = "2021"
 
@@ -16,4 +16,4 @@ wheel_timer = "0.3.1"
 tokio-serde = { version = "0.8.0", features = ["json"] }
 tokio-util = { version = "0.7.9", features = ["codec"] }
 env_logger = "0.10.0"
-rand = { version = "0.8", features = ["rand_chacha"] }
+rand = "0.8"

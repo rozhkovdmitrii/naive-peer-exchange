@@ -1,6 +1,6 @@
 use clap::Parser;
 
-use pex::PeerExchangeConfig;
+use naive_p2p_lib::NaivePeerConfig;
 
 const MESSAGING_TIMEOUT_SEC: u64 = 2;
 const DEFAULT_LISTEN_PORT: u16 = 8080;
@@ -22,9 +22,9 @@ pub(super) struct Cli {
     connect: Option<String>,
 }
 
-impl From<Cli> for PeerExchangeConfig {
+impl From<Cli> for NaivePeerConfig {
     fn from(value: Cli) -> Self {
-        PeerExchangeConfig {
+        NaivePeerConfig {
             messaging_timeout_sec: value.period,
             port: value.port,
             address: value.address,

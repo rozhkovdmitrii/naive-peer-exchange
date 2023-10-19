@@ -1,5 +1,5 @@
 [package]
-name = "naive-pex"
+name = "naive-peer"
 version = "0.1.0"
 edition = "2021"
 authors = ["Rozhkov Dmitrii <rozhkovdmitrii@yandex.ru>"]
@@ -10,6 +10,6 @@ description = "Provides a peer exchange that imples a naive messaging functional
 clap = { version = "=4.2.0", features = ["derive"] }
 env_logger = "0.10"
 log = "0.4"
-pex = { version = "0.1", path = "../pex" }
+naive_p2p_lib = { version = "0.1", path = "../naive-p2p-lib" }
 tokio = { version = "1.25", features = [ "macros", "rt", "time" ] }
 libc = "0.2.149"

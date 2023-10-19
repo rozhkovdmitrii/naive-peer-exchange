@@ -1,7 +1,7 @@
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::lock::Mutex as AsyncMutex;
 use futures::stream::{FuturesUnordered, StreamExt};
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
@@ -9,25 +9,25 @@ use tokio::task::{JoinError, JoinHandle};
 
 use crate::networking::Networking;
 use crate::peer_interactor::PeerEvent;
-use crate::peer_keeper::PeerKeeper;
-use crate::{NetworkError, NetworkEvent, PeerError, PeerExchangeConfig, PeerInteractor};
+use crate::peer_mng::PeerMng;
+use crate::{NaivePeerConfig, NetworkError, NetworkEvent, PeerError, PeerInteractor};
 
 const CHECK_TASK_RESULTS_TIMEOUT_MICROS: u64 = 10;
 
-pub struct PeerExchange {
-    config: PeerExchangeConfig,
+pub struct NaivePeer {
+    config: NaivePeerConfig,
     networking: Box<dyn Networking>,
-    peers_keeper: PeerKeeper,
+    peers_keeper: PeerMng,
     peer_handles: AsyncMutex<FuturesUnordered<JoinHandle<Result<(), PeerError>>>>,
     connect_handles: AsyncMutex<FuturesUnordered<JoinHandle<Result<(), NetworkError>>>>,
 }
 
-impl PeerExchange {
-    pub fn new(config: PeerExchangeConfig, networking: Box<dyn Networking>) -> PeerExchange {
-        PeerExchange {
+impl NaivePeer {
+    pub fn new(config: NaivePeerConfig, networking: Box<dyn Networking>) -> NaivePeer {
+        NaivePeer {
             config,
             networking,
-            peers_keeper: PeerKeeper::new(),
+            peers_keeper: PeerMng::new(),
             peer_handles: AsyncMutex::new(FuturesUnordered::default()),
             connect_handles: AsyncMutex::new(FuturesUnordered::default()),
         }
@@ -236,6 +236,7 @@ impl PeerExchange {
                 continue;
             }
             if self.peers_keeper.is_address_known(&peer_address).await {
+                trace!("{} - address is known, ignore: {}", self.self_address(), peer_address);
                 continue;
             }
             self.connect_to(peer_address).await;
