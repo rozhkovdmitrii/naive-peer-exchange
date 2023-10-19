@@ -98,7 +98,7 @@ Options:
 
 ## Example
 
-The main functionality of **`naive-peer`** is messaging, so an example is shown below. It demonstrates that messages are received from nodes at times determined by the period, 45 and 60 sec. settings set there, respectively.
+The main functionality of **`naive-peer`** is messaging, so an example is shown below demonstrates that messages are received from nodes at times determined by the period, 45 and 60 sec. settings set there, respectively.
 ```sh
 bin/naive-peer -P 20 
 # 00:00:00 - My address is: 0.0.0.0:8080
