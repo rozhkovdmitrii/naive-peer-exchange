@@ -162,7 +162,7 @@ impl NaivePeer {
             error!("Failed to register connection: {}", error);
             return;
         }
-        if let Err(error) = self.peers_keeper.on_peer_connected(conn_id, address).await {
+        if let Err(error) = self.peers_keeper.on_outgoing_peer_connected(conn_id, address).await {
             error!("{} - Failed to set_peer_as_valid: {}", self.self_address(), error);
             return;
         };
@@ -267,12 +267,6 @@ impl NaivePeer {
 
     pub async fn get_peers(&self) -> Vec<String> {
         let mut peers = self.peers_keeper.get_peers().await;
-        peers.sort();
-        peers
-    }
-
-    pub async fn get_peers_and_conn_ids(&self) -> Vec<(u64, String)> {
-        let mut peers = self.peers_keeper.get_peers_and_conn_ids().await;
         peers.sort();
         peers
     }

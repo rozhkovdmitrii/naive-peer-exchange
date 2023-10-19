@@ -6,8 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use wheel_timer::WheelTimer;
 
-use crate::peer_mng::PeerMngEvent::CheckValidity;
-use crate::PeerInteractor;
+use super::peer_interactor::PeerInteractor;
 
 const KEEPER_SCHEDULE_CAPACITY: usize = 100_000;
 const VALIDATE_TIMEOUT_TICKS: usize = 3;
@@ -70,24 +69,15 @@ impl PeerMng {
             let events = guard.schedule.tick();
             for event in events {
                 match event {
-                    CheckValidity { conn_id } => Self::remove_invalid_conn(&mut guard, conn_id),
+                    PeerMngEvent::CheckValidity { conn_id } => {
+                        Self::remove_invalid_conn(&mut guard, conn_id)
+                    }
                 }
             }
         }
     }
 
-    fn remove_invalid_conn(guard: &mut MutexGuard<'_, PeerMngContex>, conn_id: u64) {
-        let Some(conn_info) = guard.connections.get(&conn_id) else {
-            error!("Failed to get connection: {}", conn_id);
-            return;
-        };
-        if conn_info.address.is_none() {
-            warn!("Public address has not been assigned in time, deleted: {}", conn_id);
-            guard.connections.remove(&conn_id);
-        }
-    }
-
-    pub async fn on_new_connection(
+    pub(super) async fn on_new_connection(
         &self,
         conn: Arc<dyn PeerInteractor + Send>,
     ) -> Result<(), PeerMngError> {
@@ -97,10 +87,21 @@ impl PeerMng {
             Err(_) => Err(PeerMngError::ConnIdExists { conn_id }),
             Ok(new) => {
                 debug!("Connection registered: {} - {}", conn_id, new.conn.get_address());
-                guard.schedule.schedule(VALIDATE_TIMEOUT_TICKS, CheckValidity { conn_id });
+                guard
+                    .schedule
+                    .schedule(VALIDATE_TIMEOUT_TICKS, PeerMngEvent::CheckValidity { conn_id });
                 Ok(())
             }
         }
+    }
+
+    pub(super) async fn on_outgoing_peer_connected(
+        &self,
+        conn_id: u64,
+        address: String,
+    ) -> Result<(), PeerMngError> {
+        let mut guard = self.context.lock().await;
+        Self::set_peer_as_valid_impl(&mut guard, conn_id, address)
     }
 
     pub(super) async fn on_public_address(
@@ -118,13 +119,39 @@ impl PeerMng {
         Ok((conn, known_peers))
     }
 
-    pub async fn on_peer_connected(
-        &self,
-        conn_id: u64,
-        address: String,
-    ) -> Result<(), PeerMngError> {
+    pub(super) async fn on_peer_disconnected(&self, conn_id: u64) {
+        self.drop_connection(conn_id).await;
+    }
+
+    pub(super) async fn on_peer_error(&self, conn_id: u64) {
+        self.drop_connection(conn_id).await;
+    }
+
+    pub(super) async fn get_peers(&self) -> Vec<String> {
         let mut guard = self.context.lock().await;
-        Self::set_peer_as_valid_impl(&mut guard, conn_id, address)
+        Self::get_peers_impl(&mut guard)
+    }
+
+    pub(super) async fn get_valid_conns(&self) -> Vec<Arc<dyn PeerInteractor + Send>> {
+        let guard = self.context.lock().await;
+        guard
+            .connections
+            .values()
+            .filter(|conn_info| conn_info.address.is_some())
+            .map(|conn_info| conn_info.conn.clone())
+            .collect()
+    }
+
+    pub(super) async fn get_peer_address(&self, conn_id: u64) -> Option<String> {
+        let context = self.context.lock().await;
+        let conn_info = context.connections.get(&conn_id)?;
+        conn_info.address.clone()
+    }
+
+    pub(super) async fn is_address_known(&self, address: &str) -> bool {
+        let context = self.context.lock().await;
+        trace!("peers: {:?}", context.peers);
+        context.peers.contains_key(address)
     }
 
     fn set_peer_as_valid_impl(
@@ -148,12 +175,15 @@ impl PeerMng {
         Ok(())
     }
 
-    pub(super) async fn on_peer_disconnected(&self, conn_id: u64) {
-        self.drop_connection(conn_id).await;
-    }
-
-    pub(super) async fn on_peer_error(&self, conn_id: u64) {
-        self.drop_connection(conn_id).await;
+    fn remove_invalid_conn(guard: &mut MutexGuard<'_, PeerMngContex>, conn_id: u64) {
+        let Some(conn_info) = guard.connections.get(&conn_id) else {
+            error!("Failed to get connection: {}", conn_id);
+            return;
+        };
+        if conn_info.address.is_none() {
+            warn!("Public address has not been assigned in time, deleted: {}", conn_id);
+            guard.connections.remove(&conn_id);
+        }
     }
 
     async fn drop_connection(&self, conn_id: u64) {
@@ -172,34 +202,8 @@ impl PeerMng {
         debug!("Connection has been removed from registry: {}", conn_id);
     }
 
-    pub(super) async fn get_peers(&self) -> Vec<String> {
-        let mut guard = self.context.lock().await;
-        Self::get_peers_impl(&mut guard)
-    }
-
     fn get_peers_impl(guard: &mut MutexGuard<'_, PeerMngContex>) -> Vec<String> {
         guard.peers.keys().cloned().collect()
-    }
-
-    pub(super) async fn get_peers_and_conn_ids(&self) -> Vec<(u64, String)> {
-        let guard = self.context.lock().await;
-        guard.peers.iter().map(|(address, conn_id)| (*conn_id, address.clone())).collect()
-    }
-
-    pub(super) async fn get_valid_conns(&self) -> Vec<Arc<dyn PeerInteractor + Send>> {
-        let guard = self.context.lock().await;
-        guard
-            .connections
-            .values()
-            .filter(|conn_info| conn_info.address.is_some())
-            .map(|conn_info| conn_info.conn.clone())
-            .collect()
-    }
-
-    pub(super) async fn is_address_known(&self, address: &str) -> bool {
-        let context = self.context.lock().await;
-        trace!("peers: {:?}", context.peers);
-        context.peers.contains_key(address)
     }
 
     fn get_connection_impl(
@@ -210,11 +214,5 @@ impl PeerMng {
         conn_info
             .map(|conn_info| conn_info.conn.clone())
             .ok_or(PeerMngError::ConnectionNotFound { conn_id })
-    }
-
-    pub(super) async fn get_peer_address(&self, conn_id: u64) -> Option<String> {
-        let context = self.context.lock().await;
-        let conn_info = context.connections.get(&conn_id)?;
-        conn_info.address.clone()
     }
 }
