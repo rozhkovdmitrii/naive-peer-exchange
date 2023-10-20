@@ -12,7 +12,7 @@ pub(super) struct Cli {
     period: u64,
     #[arg(
         long,
-        help = "Public address to be sent as a peer address",
+        help = "Public address to be sent to the other peers as a part of intercommunication protocol",
         default_value = "127.0.0.1"
     )]
     address: String,
