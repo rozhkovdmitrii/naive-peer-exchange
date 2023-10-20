@@ -7,10 +7,10 @@ use std::time::Duration;
 use tokio::select;
 use tokio::task::{JoinError, JoinHandle};
 
-use crate::networking::Networking;
-use crate::peer_interactor::PeerEvent;
+use crate::networking::{NetworkError, NetworkEvent, Networking};
+use crate::peer_interactor::{PeerError, PeerEvent, PeerInteractor};
 use crate::peer_mng::PeerMng;
-use crate::{NaivePeerConfig, NetworkError, NetworkEvent, PeerError, PeerInteractor};
+use crate::NaivePeerConfig;
 
 const CHECK_TASK_RESULTS_TIMEOUT_MICROS: u64 = 10;
 

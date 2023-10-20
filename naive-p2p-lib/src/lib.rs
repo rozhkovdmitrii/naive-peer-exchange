@@ -7,9 +7,8 @@ mod peer_interactor;
 mod peer_mng;
 mod rpc_data;
 
-pub use crate::naive_peer::NaivePeer;
-pub use networking::{NetworkError, NetworkEvent, Networking, NetworkingImpl};
-pub use peer_interactor::{PeerError, PeerInteractor};
+pub use naive_peer::NaivePeer;
+pub use networking::NetworkingImpl;
 
 #[derive(Debug)]
 /// Determines common settings to be applied to the peer exchange instance

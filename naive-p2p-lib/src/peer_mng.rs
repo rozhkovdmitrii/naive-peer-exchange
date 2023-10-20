@@ -51,7 +51,7 @@ pub(super) enum PeerMngError {
 }
 
 impl PeerMng {
-    pub fn new() -> PeerMng {
+    pub(super) fn new() -> PeerMng {
         PeerMng {
             context: Arc::new(AsyncMutex::new(PeerMngContex {
                 connections: HashMap::default(),

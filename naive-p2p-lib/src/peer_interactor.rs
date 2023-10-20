@@ -25,7 +25,7 @@ const RELEASE_PEER_READ_TIMEOUT_MILLIS: u64 = 10;
 #[derive(Debug, Display)]
 #[display(fmt = "{}. conn_id: {}", error, conn_id)]
 pub struct PeerError {
-    pub conn_id: u64,
+    pub(super) conn_id: u64,
     error: PeerErrorImpl,
 }
 
@@ -124,7 +124,7 @@ impl PeerInteractor for PeerInteractorImpl {
 }
 
 impl PeerInteractorImpl {
-    pub fn new(id: u64, address: String, stream: TcpStream) -> PeerInteractorImpl {
+    pub(super) fn new(id: u64, address: String, stream: TcpStream) -> PeerInteractorImpl {
         let (read, write) = tokio::io::split(stream);
         PeerInteractorImpl {
             id,
