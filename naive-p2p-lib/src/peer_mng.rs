@@ -9,7 +9,7 @@ use wheel_timer::WheelTimer;
 use super::peer_interactor::PeerInteractor;
 
 const KEEPER_SCHEDULE_CAPACITY: usize = 100_000;
-const VALIDATE_TIMEOUT_TICKS: usize = 3;
+const VALIDATE_TIMEOUT_TICKS: usize = 1;
 const KEEPER_TIME_WHEEL_TIC_SEC: u64 = 1;
 
 pub(super) struct PeerMng {
