@@ -151,7 +151,6 @@ async fn test_many_peers_network() {
             .map(|port| format!("127.0.0.1:{}", port))
             .collect();
 
-        let _info = peer.get_peers_and_conn_ids().await;
         assert_eq!(peer.get_peers().await, expected);
     }
 }
