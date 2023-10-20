@@ -10,17 +10,16 @@ mod rpc_data;
 pub use naive_peer::NaivePeer;
 pub use networking::NetworkingImpl;
 
-#[derive(Debug)]
 /// Determines common settings to be applied to the peer exchange instance
 pub struct NaivePeerConfig {
     /// Public address could differ from the local interface that is accepting new connections
-    pub address: String,
+    address: String,
     /// Public port to accept new connections on
-    pub port: u16,
+    port: u16,
     /// Timeout that is used to determine in which moments random messages should be sent
-    pub messaging_timeout_sec: u64,
+    messaging_timeout_sec: u64,
     /// Initial peer to be connected by the current one at start
-    pub init_peer: Option<String>,
+    init_peer: Option<String>,
 }
 
 impl NaivePeerConfig {

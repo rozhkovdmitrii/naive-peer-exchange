@@ -24,11 +24,6 @@ pub(super) struct Cli {
 
 impl From<Cli> for NaivePeerConfig {
     fn from(value: Cli) -> Self {
-        NaivePeerConfig {
-            messaging_timeout_sec: value.period,
-            port: value.port,
-            address: value.address,
-            init_peer: value.connect,
-        }
+        NaivePeerConfig::new(value.address, value.port, value.period, value.connect)
     }
 }
