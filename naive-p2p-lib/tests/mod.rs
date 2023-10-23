@@ -154,3 +154,40 @@ async fn test_many_peers_network() {
         assert_eq!(peer.get_peers().await, expected);
     }
 }
+
+#[tokio::test]
+async fn test_peer_disconnected() {
+    init_logging();
+    let peer1 = Arc::new(NaivePeer::new(
+        NaivePeerConfig::new("127.0.0.1", 8082, 2, None),
+        <Box<NetworkingImpl>>::default(),
+    ));
+    let peer1_copy = peer1.clone();
+
+    let peer2 = Arc::new(NaivePeer::new(
+        NaivePeerConfig::new("127.0.0.1", 8083, 1, Some("127.0.0.1:8082")),
+        <Box<NetworkingImpl>>::default(),
+    ));
+    let peer2_copy = peer2.clone();
+
+    let peer3 = Arc::new(NaivePeer::new(
+        NaivePeerConfig::new("127.0.0.1", 8084, 1, Some("127.0.0.1:8083")),
+        <Box<NetworkingImpl>>::default(),
+    ));
+    let peer3_copy = peer3.clone();
+
+    spawn(async move { peer1_copy.execute().await });
+    spawn(async move { peer2_copy.execute().await });
+    let peer3_handle = spawn(async move { peer3_copy.execute().await });
+    tokio::time::sleep(Duration::from_millis(10)).await;
+
+    assert_eq!(peer1.get_peers().await, vec!["127.0.0.1:8083", "127.0.0.1:8084",]);
+    assert_eq!(peer2.get_peers().await, vec!["127.0.0.1:8082", "127.0.0.1:8084",]);
+    assert_eq!(peer3.get_peers().await, vec!["127.0.0.1:8082", "127.0.0.1:8083",]);
+
+    peer3_handle.abort();
+    drop(peer3);
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    assert_eq!(peer1.get_peers().await, vec!["127.0.0.1:8083"]);
+    assert_eq!(peer2.get_peers().await, vec!["127.0.0.1:8082"]);
+}
