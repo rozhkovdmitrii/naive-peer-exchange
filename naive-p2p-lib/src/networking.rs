@@ -28,17 +28,17 @@ pub enum NetworkError {
         port,
         error
     )]
-    BindServerError {
+    BindServer {
         interface: String,
         port: u16,
         error: String,
     },
     #[display(fmt = "Failed to accept incoming connection: {}", _0)]
-    AcceptError(String),
+    Accept(String),
     #[display(fmt = "Failed to connect to: {}, error: {}", address, error)]
-    ConnectingError { address: String, error: String },
+    Connecting { address: String, error: String },
     #[display(fmt = "Failed to pass a new peer connection over the channel: {}", _0)]
-    ChannelError(String),
+    EventChannel(String),
 }
 
 pub enum NetworkEvent {
@@ -94,7 +94,7 @@ impl NetworkingImpl {
     ) -> Result<(), NetworkError> {
         let (ip, port) = (INTERFACE_TO_LISTEN, port);
         let server =
-            TcpListener::bind((ip, port)).await.map_err(|err| NetworkError::BindServerError {
+            TcpListener::bind((ip, port)).await.map_err(|err| NetworkError::BindServer {
                 interface: ip.to_string(),
                 port,
                 error: err.to_string(),
@@ -102,10 +102,8 @@ impl NetworkingImpl {
         info!("My address is: {}:{}", ip, port);
         loop {
             debug!("Wait for the new connection on port:  {}", port);
-            let (stream, address) = server
-                .accept()
-                .await
-                .map_err(|error| NetworkError::AcceptError(error.to_string()))?;
+            let (stream, address) =
+                server.accept().await.map_err(|error| NetworkError::Accept(error.to_string()))?;
             debug!("Successfully accepted connection: {}", address);
             let id = id_counter.fetch_add(1, Ordering::Release);
             tx.send(NetworkEvent::Accepted(Box::new(PeerInteractorImpl::new(
@@ -114,7 +112,7 @@ impl NetworkingImpl {
                 stream,
             ))))
             .await
-            .map_err(|error| NetworkError::ChannelError(error.to_string()))?;
+            .map_err(|error| NetworkError::EventChannel(error.to_string()))?;
             debug!("Accepted connection sent through the channel: {}", address);
         }
     }
@@ -123,17 +121,16 @@ impl NetworkingImpl {
         let new_id = self.id_counter.fetch_add(1, Ordering::Release);
         let mut event_tx = { self.event_tx.lock().await.clone() };
         spawn(async move {
-            let stream = TcpStream::connect(&address).await.map_err(|error| {
-                NetworkError::ConnectingError {
+            let stream =
+                TcpStream::connect(&address).await.map_err(|error| NetworkError::Connecting {
                     address: address.clone(),
                     error: error.to_string(),
-                }
-            })?;
+                })?;
             let peer = Box::new(PeerInteractorImpl::new(new_id, address, stream));
             event_tx
                 .send(NetworkEvent::Connected(peer))
                 .await
-                .map_err(|error| NetworkError::ChannelError(error.to_string()))
+                .map_err(|error| NetworkError::EventChannel(error.to_string()))
         })
     }
 }
